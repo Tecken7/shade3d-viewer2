@@ -56,7 +56,7 @@ export default function Page() {
                     {visible2 ? '👁️' : '🚫'}
                 </button>
 
-                <div style={{ marginTop: '10px' }}>Crown21:</div>
+                <div style={{ marginTop: '10px' }}>Dental:</div>
                 <input type="color" value={color3} onChange={(e) => setColor3(e.target.value)} />
                 <input type="range" min={0} max={1} step={0.01} value={opacity3} onChange={(e) => setOpacity3(parseFloat(e.target.value))} />
                 <button onClick={() => setVisible3(!visible3)} style={{ marginLeft: '8px' }}>
