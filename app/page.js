@@ -1,6 +1,7 @@
 "use client"
 
 export const dynamic = "force-dynamic"
+export const revalidate = 0
 
 import { Canvas, useThree, useFrame } from "@react-three/fiber"
 import * as THREE from "three"
@@ -34,7 +35,6 @@ function PreloadIcons() {
 
 /* ---------- Helpers ---------- */
 const DEFAULT_LOGO = "/Arthetic_logo.png"
-
 const stripExt = (s) => s?.replace(/\.[^.]+$/, "") || ""
 const clamp01 = (x) => Math.max(0, Math.min(1, x))
 const getParam = (name) => {
@@ -73,45 +73,7 @@ function InlineLoader({ text }) {
   )
 }
 
-/* ---------- Trackball s dynamickým targetem ---------- */
-function TouchTrackballControls({ target = [0, 0, 0] }) {
-  const { camera, gl } = useThree()
-  const controlsRef = useRef(null)
-  const targetVec = useMemo(() => new THREE.Vector3(...target), [target])
-
-  useEffect(() => {
-    const controls = new TrackballControls(camera, gl.domElement)
-    controls.rotateSpeed = 5.0
-    controls.zoomSpeed = 1.2
-    controls.panSpeed = 1.0
-    controls.staticMoving = true
-    controlsRef.current = controls
-
-    const handleTouchStart = (e) => { e.preventDefault(); controls.handleTouchStart(e) }
-    const handleTouchMove = (e) => { e.preventDefault(); controls.handleTouchMove(e) }
-    gl.domElement.addEventListener("touchstart", handleTouchStart, { passive: false })
-    gl.domElement.addEventListener("touchmove", handleTouchMove, { passive: false })
-
-    return () => {
-      gl.domElement.removeEventListener("touchstart", handleTouchStart)
-      gl.domElement.removeEventListener("touchmove", handleTouchMove)
-      controls.dispose()
-    }
-  }, [camera, gl])
-
-  useFrame(() => {
-    if (!controlsRef.current) return
-    controlsRef.current.target.copy(targetVec)
-    if (camera.isOrthographicCamera) {
-      controlsRef.current.panSpeed = camera.zoom * 0.4
-    }
-    controlsRef.current.update()
-  })
-
-  return null
-}
-
-/* ---------- Načtení libovolného 3D (OBJ/STL/PLY) ---------- */
+/* ---------- AnyModel (OBJ/STL/PLY) ---------- */
 function AnyModel({ name, url, color, opacity, visible, onLoaded }) {
   const [object3D, setObject3D] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -163,7 +125,6 @@ function AnyModel({ name, url, color, opacity, visible, onLoaded }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [url, ext])
 
-  // re-aplikace materiálu při změně barvy/průhlednosti
   useEffect(() => {
     if (!object3D) return
     const mat = makeMaterial()
@@ -180,8 +141,46 @@ function AnyModel({ name, url, color, opacity, visible, onLoaded }) {
   return visible ? <primitive object={object3D} /> : null
 }
 
-/* ---------- Auto-center + auto-frame ---------- */
-function useAutoCenterAndFrame({
+/* ---------- Trackball & target (uvnitř Canvas!) ---------- */
+function TouchTrackballControls({ target = [0, 0, 0] }) {
+  const { camera, gl } = useThree()
+  const controlsRef = useRef(null)
+  const targetVec = useMemo(() => new THREE.Vector3(...target), [target])
+
+  useEffect(() => {
+    const controls = new TrackballControls(camera, gl.domElement)
+    controls.rotateSpeed = 5.0
+    controls.zoomSpeed = 1.2
+    controls.panSpeed = 1.0
+    controls.staticMoving = true
+    controlsRef.current = controls
+
+    const handleTouchStart = (e) => { e.preventDefault(); controls.handleTouchStart(e) }
+    const handleTouchMove = (e) => { e.preventDefault(); controls.handleTouchMove(e) }
+    gl.domElement.addEventListener("touchstart", handleTouchStart, { passive: false })
+    gl.domElement.addEventListener("touchmove", handleTouchMove, { passive: false })
+
+    return () => {
+      gl.domElement.removeEventListener("touchstart", handleTouchStart)
+      gl.domElement.removeEventListener("touchmove", handleTouchMove)
+      controls.dispose()
+    }
+  }, [camera, gl])
+
+  useFrame(() => {
+    if (!controlsRef.current) return
+    controlsRef.current.target.copy(targetVec)
+    if (camera.isOrthographicCamera) {
+      controlsRef.current.panSpeed = camera.zoom * 0.4
+    }
+    controlsRef.current.update()
+  })
+
+  return null
+}
+
+/* ---------- AutoCenter & AutoFrame (uvnitř Canvas!) ---------- */
+function AutoCenterAndFrame({
   rootRef,
   depsKey,
   setTarget,
@@ -197,7 +196,6 @@ function useAutoCenterAndFrame({
     const root = rootRef.current
     if (!root) return
 
-    // 1) spočítej bbox celé scény (před posunem)
     root.updateMatrixWorld(true)
     const boxAll = new THREE.Box3().setFromObject(root)
     if (boxAll.isEmpty()) return
@@ -207,37 +205,30 @@ function useAutoCenterAndFrame({
     boxAll.getSize(sizeAll)
     boxAll.getCenter(centerAll)
 
-    // 2) centrování
     if (centerMode === "per") {
-      // každý child zvlášť na svůj střed
       root.children.forEach((child) => {
         const b = new THREE.Box3().setFromObject(child)
         if (b.isEmpty()) return
         const cWorld = new THREE.Vector3()
         b.getCenter(cWorld)
-        // posuň child tak, aby jeho střed ležel v [0,0,0] rodiče
         child.position.sub(cWorld)
       })
       root.updateMatrixWorld(true)
       setTarget([0, 0, 0])
     } else if (centerMode === "combined") {
-      // posuň celou scénu tak, aby společný střed byl v [0,0,0]
       root.position.sub(centerAll)
       root.updateMatrixWorld(true)
       setTarget([0, 0, 0])
     } else {
-      // bez posunu – target je skutečný střed v prostoru
       setTarget([centerAll.x, centerAll.y, centerAll.z])
     }
 
-    // 3) spočítej bbox znovu po centrování (pro storno perspektivy / zoom)
-    const boxAfter = new THREE.Box3().setFromObject(root)
+    const after = new THREE.Box3().setFromObject(root)
     const dims = new THREE.Vector3()
     const ctr = new THREE.Vector3()
-    boxAfter.getSize(dims)
-    boxAfter.getCenter(ctr)
+    after.getSize(dims)
+    after.getCenter(ctr)
 
-    // 4) fit kamery (ortho) – X/Y určují zoom, Z zarovnáme k centru kvůli clipům
     const objW = Math.max(dims.x, 1e-6)
     const objH = Math.max(dims.y, 1e-6)
     const zoomX = size.width / (objW * margin)
@@ -245,17 +236,18 @@ function useAutoCenterAndFrame({
     let newZoom = Math.min(zoomX, zoomY)
     newZoom *= isMobile ? mobileScale : desktopScale
 
-    // rozumné limity pro ortho
     camera.near = -1_000_000
     camera.far = 1_000_000
     camera.zoom = Math.max(newZoom, 0.01)
-    camera.position.set(ctr.x, ctr.y, ctr.z + Math.abs(camera.position.z)) // držíme “vzdálenost”, cílíme na střed
+    camera.position.set(ctr.x, ctr.y, ctr.z + Math.abs(camera.position.z))
     camera.updateProjectionMatrix()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rootRef, depsKey, size.width, size.height, isMobile, desktopScale, mobileScale, margin, centerMode])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [depsKey, size.width, size.height, isMobile, desktopScale, mobileScale, margin, centerMode])
+
+  return null
 }
 
-/* ---------- Color popover ---------- */
+/* ---------- Page (UI + Canvas) ---------- */
 function ColorSwatch({ color, onChange, ariaLabel }) {
   const [open, setOpen] = useState(false)
   const containerRef = useRef(null)
@@ -304,7 +296,6 @@ function ColorSwatch({ color, onChange, ariaLabel }) {
   )
 }
 
-/* ---------- Page ---------- */
 export default function Page() {
   // světla
   const [lightIntensity, setLightIntensity] = useState(1)
@@ -340,17 +331,11 @@ export default function Page() {
   // Trackball target
   const [cameraTarget, setCameraTarget] = useState([0, 0, 0])
 
-  // načtené objekty (pro “ready” trigger)
-  const [loadedObjects, setLoadedObjects] = useState([])
+  // načtené objekty count
+  const [loadedCount, setLoadedCount] = useState(0)
+  const handleModelLoaded = () => setLoadedCount((n) => n + 1)
 
-  const handleModelLoaded = (obj) => {
-    setLoadedObjects((prev) => (prev.includes(obj) ? prev : [...prev, obj]))
-  }
-
-  // top-level group, kterou případně posouváme
-  const rootRef = useRef()
-
-  // Parametr centrování
+  // parametr centrování
   const centerParam = (getParam("center") || "combined").toLowerCase()
   const centerMode = ["per", "combined", "none"].includes(centerParam) ? centerParam : "combined"
 
@@ -419,44 +404,35 @@ export default function Page() {
     })()
   }, [])
 
-  // Po načtení všech objektů: auto-center + auto-frame
-  useAutoCenterAndFrame({
-    rootRef,
-    depsKey: loadedObjects.length === files.length ? `ready-${files.length}` : "loading",
-    setTarget: setCameraTarget,
-    margin: 1.2,
-    isMobile,
-    desktopScale: 0.4,
-    mobileScale: 1.0,
-    centerMode, // "combined" | "per" | "none"
-  })
+  // logo pozadí (pod Canvas)
+  const logoEl = logoCfg.url && (
+    <img
+      src={logoCfg.url}
+      alt=""
+      style={{
+        position: "absolute",
+        bottom: logoCfg.pos === "bc" || logoCfg.pos === "bl" || logoCfg.pos === "br" ? 12 : "auto",
+        left: logoCfg.pos === "bl" ? 12 : logoCfg.pos === "bc" ? "50%" : "auto",
+        right: logoCfg.pos === "br" ? 12 : "auto",
+        transform: logoCfg.pos === "bc" ? "translateX(-50%)" : "none",
+        width: logoCfg.width,
+        opacity: logoCfg.opacity,
+        zIndex: 0,
+        pointerEvents: "none",
+        userSelect: "none",
+        filter: "drop-shadow(0 0 1px rgba(0,0,0,.25))",
+      }}
+    />
+  )
 
   return (
     <div className="stage" style={{ position: "relative", width: "100vw", height: "100vh", background: "black" }}>
       <PreloadIcons />
 
       {/* LOGO pod scénou */}
-      {logoCfg.url && (
-        <img
-          src={logoCfg.url}
-          alt=""
-          style={{
-            position: "absolute",
-            bottom: logoCfg.pos === "bc" || logoCfg.pos === "bl" || logoCfg.pos === "br" ? 12 : "auto",
-            left: logoCfg.pos === "bl" ? 12 : logoCfg.pos === "bc" ? "50%" : "auto",
-            right: logoCfg.pos === "br" ? 12 : "auto",
-            transform: logoCfg.pos === "bc" ? "translateX(-50%)" : "none",
-            width: logoCfg.width,
-            opacity: logoCfg.opacity,
-            zIndex: 0,
-            pointerEvents: "none",
-            userSelect: "none",
-            filter: "drop-shadow(0 0 1px rgba(0,0,0,.25))",
-          }}
-        />
-      )}
+      {logoEl}
 
-      {/* Ovládací panel */}
+      {/* Ovládací panel (mimo Canvas) */}
       <div
         className="controls-panel"
         style={{
@@ -619,7 +595,7 @@ export default function Page() {
         )}
       </div>
 
-      {/* SCÉNA */}
+      {/* CANVAS */}
       <Canvas
         orthographic
         camera={{ position: [0, 0, 100], near: -100000, far: 100000 }}
@@ -635,7 +611,7 @@ export default function Page() {
             <directionalLight position={[lightPos3.x, lightPos3.y, lightPos3.z]} intensity={lightIntensity * 1.2} />
             <directionalLight position={[lightPos4.x, lightPos4.y, lightPos4.z]} intensity={lightIntensity * 0.8} />
 
-            <group ref={rootRef}>
+            <group /* root pro centrování */ ref={group => (Page.__rootRef = group)}>
               <Suspense fallback={null}>
                 {files.map((f, i) => (
                   <AnyModel
@@ -651,7 +627,17 @@ export default function Page() {
               </Suspense>
             </group>
 
-            {/* Trackball s aktuálním středem */}
+            {/* Auto-center/fit + Trackball (UVNITŘ Canvas) */}
+            <AutoCenterAndFrame
+              rootRef={{ current: Page.__rootRef }}
+              depsKey={loadedCount === files.length ? `ready-${files.length}` : `loading-${loadedCount}`}
+              setTarget={setCameraTarget}
+              margin={1.2}
+              isMobile={isMobile}
+              desktopScale={0.4}
+              mobileScale={1.0}
+              centerMode={centerMode}
+            />
             <TouchTrackballControls target={cameraTarget} />
           </>
         )}
