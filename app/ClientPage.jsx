@@ -104,7 +104,9 @@ function AnyModel({ name, url, color, opacity, visible, onLoaded }) {
         } else {
           obj = await new OBJLoader().loadAsync(url)
           const mat = makeMaterial()
-          obj.traverse((child) => { if (child.isMesh) child.material = mat })
+          obj.traverse((child) => {
+            if (child.isMesh) child.material = mat
+          })
         }
         if (!cancelled) {
           setObject3D(obj)
@@ -116,15 +118,22 @@ function AnyModel({ name, url, color, opacity, visible, onLoaded }) {
         console.error("Model load error:", e)
       }
     })()
-    return () => { cancelled = true }
+    return () => {
+      cancelled = true
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [url, ext])
 
   useEffect(() => {
     if (!object3D) return
     const mat = makeMaterial()
-    if (object3D.isMesh) object3D.material = mat
-    else object3D.traverse((child) => { if (child.isMesh) child.material = mat })
+    if (object3D.isMesh) {
+      object3D.material = mat
+    } else {
+      object3D.traverse((child) => {
+        if (child.isMesh) child.material = mat
+      })
+    }
   }, [color, opacity, object3D])
 
   if (!object3D) return loading ? <InlineLoader text={`Načítám ${name || url}`} /> : null
@@ -144,8 +153,14 @@ function TouchTrackballControls({ target = [0, 0, 0] }) {
     controls.staticMoving = true
     controlsRef.current = controls
 
-    const handleTouchStart = (e) => { e.preventDefault(); controls.handleTouchStart(e) }
-    const handleTouchMove = (e) => { e.preventDefault(); controls.handleTouchMove(e) }
+    const handleTouchStart = (e) => {
+      e.preventDefault()
+      controls.handleTouchStart(e)
+    }
+    const handleTouchMove = (e) => {
+      e.preventDefault()
+      controls.handleTouchMove(e)
+    }
     gl.domElement.addEventListener("touchstart", handleTouchStart, { passive: false })
     gl.domElement.addEventListener("touchmove", handleTouchMove, { passive: false })
 
@@ -236,8 +251,7 @@ function AutoCenterAndFrame({
     camera.zoom = Math.max(newZoom, 0.01)
     camera.position.set(ctr.x, ctr.y, ctr.z + Math.abs(camera.position.z))
     camera.updateProjectionMatrix()
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [depsKey, size.width, size.height, isMobile, desktopScale, mobileScale, margin, centerMode])
+  }, [depsKey, size.width, size.height, isMobile, desktopScale, mobileScale, margin, centerMode, camera])
 
   return null
 }
@@ -247,7 +261,9 @@ function ColorSwatch({ color, onChange, ariaLabel }) {
   const [open, setOpen] = useState(false)
   const containerRef = useRef(null)
   useEffect(() => {
-    const onDocClick = (e) => { if (open && containerRef.current && !containerRef.current.contains(e.target)) setOpen(false) }
+    const onDocClick = (e) => {
+      if (open && containerRef.current && !containerRef.current.contains(e.target)) setOpen(false)
+    }
     document.addEventListener("mousedown", onDocClick)
     return () => document.removeEventListener("mousedown", onDocClick)
   }, [open])
@@ -258,16 +274,27 @@ function ColorSwatch({ color, onChange, ariaLabel }) {
         onClick={() => setOpen((v) => !v)}
         className="swatch-btn"
         style={{
-          width: 36, height: 22, borderRadius: 4, border: "1px solid #fff",
-          background: color, cursor: "pointer", boxShadow: "0 0 0 1px rgba(0,0,0,.25) inset",
+          width: 36,
+          height: 22,
+          borderRadius: 4,
+          border: "1px solid #fff",
+          background: color,
+          cursor: "pointer",
+          boxShadow: "0 0 0 1px rgba(0,0,0,.25) inset",
         }}
       />
       {open && (
         <div
           style={{
-            position: "absolute", zIndex: 20, top: 28, left: 0,
-            background: "rgba(0,0,0,.92)", padding: 12, borderRadius: 10,
-            border: "1px solid rgba(255,255,255,.18)", backdropFilter: "blur(4px)",
+            position: "absolute",
+            zIndex: 20,
+            top: 28,
+            left: 0,
+            background: "rgba(0,0,0,.92)",
+            padding: 12,
+            borderRadius: 10,
+            border: "1px solid rgba(255,255,255,.18)",
+            backdropFilter: "blur(4px)",
             boxShadow: "0 6px 24px rgba(0,0,0,.35)",
           }}
         >
@@ -279,9 +306,14 @@ function ColorSwatch({ color, onChange, ariaLabel }) {
               onChange={onChange}
               prefixed={false}
               style={{
-                width: 90, padding: "4px 6px", borderRadius: 6,
-                border: "1px solid #444", background: "#111", color: "#fff",
-                fontFamily: "monospace", fontSize: 12,
+                width: 90,
+                padding: "4px 6px",
+                borderRadius: 6,
+                border: "1px solid #444",
+                background: "#111",
+                color: "#fff",
+                fontFamily: "monospace",
+                fontSize: 12,
               }}
             />
           </div>
@@ -310,7 +342,8 @@ export default function ClientPage() {
   const [isMobile, setIsMobile] = useState(false)
   useEffect(() => {
     const uaMobile = /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent)
-    const coarse = typeof window !== "undefined" && window.matchMedia && window.matchMedia("(pointer: coarse)").matches
+    const coarse =
+      typeof window !== "undefined" && window.matchMedia && window.matchMedia("(pointer: coarse)").matches
     const narrow = typeof window !== "undefined" && window.innerWidth < 768
     setIsMobile(uaMobile || coarse || narrow)
   }, [])
@@ -327,8 +360,8 @@ export default function ClientPage() {
     text: "",
     opacity: 0.9,
     color: "#ffffff",
-    size: 18,  // px
-    pos: "tr", // top-right default
+    size: 18,
+    pos: "tr",
   })
 
   // Trackball target
@@ -346,7 +379,10 @@ export default function ClientPage() {
   useEffect(() => {
     ;(async () => {
       try {
-        const manifestUrl = getParam("manifest")
+        // ✅ bereme i alias "?m=" a hlavně DEKÓDUJEME param
+        const manifestParam = getParam("manifest") || getParam("m")
+        const manifestUrl = manifestParam ? decodeURIComponent(manifestParam) : null
+
         if (manifestUrl) {
           const m = await fetchJSON(manifestUrl)
           const Fs = (m?.files || []).map((x, i) => ({
@@ -369,7 +405,6 @@ export default function ClientPage() {
             pos: getParam("logoPos") || "bc",
           })
 
-          // Title (priorita: manifest.title → ?title param)
           const titleText = (m?.title ?? getParam("title") ?? "").toString()
           const tOpacity = clamp01(parseFloat(getParam("titleOpacity") ?? "0.9"))
           const tColor = getParam("titleColor") || "#ffffff"
@@ -385,6 +420,7 @@ export default function ClientPage() {
           return
         }
 
+        // alternativně raw ?files=[...]
         const f = getParam("files")
         if (f) {
           const arr = JSON.parse(decodeURIComponent(f))
@@ -461,13 +497,20 @@ export default function ClientPage() {
   const titleStylePos = (() => {
     const base = { position: "absolute", zIndex: 0, pointerEvents: "none", userSelect: "none" }
     switch (titleCfg.pos) {
-      case "tl": return { ...base, top: 12, left: 12 }
-      case "tr": return { ...base, top: 12, right: 12 }
-      case "bl": return { ...base, bottom: 12, left: 12 }
-      case "br": return { ...base, bottom: 12, right: 12 }
-      case "tc": return { ...base, top: 12, left: "50%", transform: "translateX(-50%)" }
-      case "bc": return { ...base, bottom: 12, left: "50%", transform: "translateX(-50%)" }
-      default: return { ...base, top: 12, right: 12 }
+      case "tl":
+        return { ...base, top: 12, left: 12 }
+      case "tr":
+        return { ...base, top: 12, right: 12 }
+      case "bl":
+        return { ...base, bottom: 12, left: 12 }
+      case "br":
+        return { ...base, bottom: 12, right: 12 }
+      case "tc":
+        return { ...base, top: 12, left: "50%", transform: "translateX(-50%)" }
+      case "bc":
+        return { ...base, bottom: 12, left: "50%", transform: "translateX(-50%)" }
+      default:
+        return { ...base, top: 12, right: 12 }
     }
   })()
   const titleEl =
@@ -528,10 +571,24 @@ export default function ClientPage() {
         }}
       >
         {fatal ? (
-          <div style={{ color: "#ff8b8b" }}>{fatal}</div>
+          <div
+            style={{
+              color: "#ff8b8b",
+              background: "rgba(255, 0, 0, .08)",
+              border: "1px solid rgba(255, 0, 0, .35)",
+              padding: "8px 10px",
+              borderRadius: 10,
+            }}
+          >
+            {fatal}
+          </div>
         ) : (
           files.map((f, i) => (
-            <div className="control-row" key={i} style={{ display: "flex", alignItems: "center", gap: 8, margin: "6px 0" }}>
+            <div
+              className="control-row"
+              key={i}
+              style={{ display: "flex", alignItems: "center", gap: 8, margin: "6px 0" }}
+            >
               <div
                 className="row-label"
                 style={{ width: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
@@ -583,14 +640,30 @@ export default function ClientPage() {
                   alt=""
                   width="20"
                   height="20"
-                  style={{ position: "absolute", inset: 0, width: 20, height: 20, margin: "auto", opacity: visibles[i] ? 1 : 0, transition: "opacity .06s linear" }}
+                  style={{
+                    position: "absolute",
+                    inset: 0,
+                    width: 20,
+                    height: 20,
+                    margin: "auto",
+                    opacity: visibles[i] ? 1 : 0,
+                    transition: "opacity .06s linear",
+                  }}
                 />
                 <img
                   src={ICONS.eyeOff}
                   alt=""
                   width="20"
                   height="20"
-                  style={{ position: "absolute", inset: 0, width: 20, height: 20, margin: "auto", opacity: visibles[i] ? 0 : 1, transition: "opacity .06s linear" }}
+                  style={{
+                    position: "absolute",
+                    inset: 0,
+                    width: 20,
+                    height: 20,
+                    margin: "auto",
+                    opacity: visibles[i] ? 0 : 1,
+                    transition: "opacity .06s linear",
+                  }}
                 />
               </button>
             </div>
@@ -617,22 +690,55 @@ export default function ClientPage() {
                 cursor: "pointer",
               }}
             >
-              <span className="arrow-stack" aria-hidden style={{ position: "relative", width: 16, height: 16, display: "inline-block" }}>
-                <img src={ICONS.arrowClosed} width="16" height="16" style={{ position: "absolute", left: 0, top: 0, opacity: showLights ? 0 : 1 }} alt="" />
-                <img src={ICONS.arrowOpen} width="16" height="16" style={{ position: "absolute", left: 0, top: 0, opacity: showLights ? 1 : 0 }} alt="" />
+              <span
+                className="arrow-stack"
+                aria-hidden
+                style={{ position: "relative", width: 16, height: 16, display: "inline-block" }}
+              >
+                <img
+                  src={ICONS.arrowClosed}
+                  width="16"
+                  height="16"
+                  style={{ position: "absolute", left: 0, top: 0, opacity: showLights ? 0 : 1 }}
+                  alt=""
+                />
+                <img
+                  src={ICONS.arrowOpen}
+                  width="16"
+                  height="16"
+                  style={{ position: "absolute", left: 0, top: 0, opacity: showLights ? 1 : 0 }}
+                  alt=""
+                />
               </span>
               <span className="arrow-label">Světla</span>
             </button>
 
             {showLights && (
               <div style={{ marginTop: 8 }}>
-                <div className="lights-row" style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+                <div
+                  className="lights-row"
+                  style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}
+                >
                   <img src={ICONS.bulb} alt="" width="16" height="16" style={{ width: 16, height: 16 }} />
                   <span>Light Intensity</span>
                 </div>
                 <div className="axis-row" style={{ display: "flex", alignItems: "center", gap: 8, margin: "4px 0" }}>
-                  <span className="axis-label" aria-hidden="true" style={{ width: 18, textAlign: "right", color: "#fff", opacity: 0.9 }}>&nbsp;</span>
-                  <input className="slider" type="range" min={0} max={2} step={0.01} value={lightIntensity} onChange={(e) => setLightIntensity(parseFloat(e.target.value))} />
+                  <span
+                    className="axis-label"
+                    aria-hidden="true"
+                    style={{ width: 18, textAlign: "right", color: "#fff", opacity: 0.9 }}
+                  >
+                    &nbsp;
+                  </span>
+                  <input
+                    className="slider"
+                    type="range"
+                    min={0}
+                    max={2}
+                    step={0.01}
+                    value={lightIntensity}
+                    onChange={(e) => setLightIntensity(parseFloat(e.target.value))}
+                  />
                 </div>
                 {[
                   { label: "Light 1 Position", pos: lightPos1, setPos: setLightPos1 },
@@ -641,13 +747,25 @@ export default function ClientPage() {
                   { label: "Light 4 Position", pos: lightPos4, setPos: setLightPos4 },
                 ].map((light, idx) => (
                   <div key={idx} style={{ marginTop: 10 }}>
-                    <div className="lights-row" style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+                    <div
+                      className="lights-row"
+                      style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}
+                    >
                       <img src={ICONS.flashlight} alt="" width="16" height="16" style={{ width: 16, height: 16 }} />
                       <span>{light.label}</span>
                     </div>
                     {["x", "y", "z"].map((axis) => (
-                      <div className="axis-row" key={axis} style={{ display: "flex", alignItems: "center", gap: 8, margin: "4px 0" }}>
-                        <span className="axis-label" style={{ width: 18, textAlign: "right", color: "#fff", opacity: 0.9 }}>{axis.toUpperCase()}:</span>
+                      <div
+                        className="axis-row"
+                        key={axis}
+                        style={{ display: "flex", alignItems: "center", gap: 8, margin: "4px 0" }}
+                      >
+                        <span
+                          className="axis-label"
+                          style={{ width: 18, textAlign: "right", color: "#fff", opacity: 0.9 }}
+                        >
+                          {axis.toUpperCase()}:
+                        </span>
                         <input
                           className="slider"
                           type="range"
@@ -718,11 +836,46 @@ export default function ClientPage() {
 
       {/* Globální styly sliderů */}
       <style jsx global>{`
-        .slider { appearance: none; width: var(--slider-width, 180px); height: 14px; background: transparent; margin: 5px 0; display: inline-block; }
-        .slider::-webkit-slider-runnable-track { height: 4px; background: white; border-radius: 2px; }
-        .slider::-webkit-slider-thumb { appearance: none; width: 14px; height: 14px; border-radius: 50%; background: white; cursor: pointer; box-shadow: 0 0 2px black; margin-top: -5px; }
-        .slider::-moz-range-track { height: 4px; background: white; border-radius: 2px; }
-        .slider::-moz-range-thumb { width: 14px; height: 14px; border-radius: 50%; background: white; cursor: pointer; box-shadow: 0 0 2px black; border: none; }
+        .slider {
+          -webkit-appearance: none;
+          -moz-appearance: none;
+          appearance: none;
+          width: var(--slider-width, 180px);
+          height: 14px;
+          background: transparent;
+          margin: 5px 0;
+          display: inline-block;
+        }
+        .slider::-webkit-slider-runnable-track {
+          height: 4px;
+          background: white;
+          border-radius: 2px;
+        }
+        .slider::-webkit-slider-thumb {
+          -webkit-appearance: none;
+          appearance: none;
+          width: 14px;
+          height: 14px;
+          border-radius: 50%;
+          background: white;
+          cursor: pointer;
+          box-shadow: 0 0 2px black;
+          margin-top: -5px;
+        }
+        .slider::-moz-range-track {
+          height: 4px;
+          background: white;
+          border-radius: 2px;
+        }
+        .slider::-moz-range-thumb {
+          width: 14px;
+          height: 14px;
+          border-radius: 50%;
+          background: white;
+          cursor: pointer;
+          box-shadow: 0 0 2px black;
+          border: none;
+        }
       `}</style>
     </div>
   )
