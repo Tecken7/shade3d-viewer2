@@ -29,7 +29,7 @@ function PreloadIcons() {
 }
 
 /* ---------- Helpers ---------- */
-const DEFAULT_LOGO = '/logo-arthetic.svg' // soubor dej do public/logo-arthetic.svg
+const DEFAULT_LOGO = '/Arthetic_logo.png' // soubor dej do public/logo-arthetic.svg
 function stripExt(s){ return s?.replace(/\.[^.]+$/,"") || "" }
 function clamp01(x){ return Math.max(0, Math.min(1, x)) }
 
