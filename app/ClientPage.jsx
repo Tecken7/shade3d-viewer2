@@ -10,10 +10,6 @@ import { OBJLoader } from "three/examples/jsm/loaders/OBJLoader"
 import { STLLoader } from "three/examples/jsm/loaders/STLLoader"
 import { PLYLoader } from "three/examples/jsm/loaders/PLYLoader"
 
-/* ---------- Public Supabase (pro hezké /v/:id odkazy) ---------- */
-const PUBLIC_SUPABASE_URL = "https://jqnkdjgmenerioodqcpa.supabase.co"
-const PUBLIC_BUCKET = "models"
-
 /* ---------- Ikony + preload ---------- */
 const ICONS = {
   eye: "/icons/Eye.png",
@@ -41,11 +37,6 @@ const clamp01 = (x) => Math.max(0, Math.min(1, x))
 const getParam = (name) => {
   if (typeof window === "undefined") return null
   return new URL(window.location.href).searchParams.get(name)
-}
-const getPathId = () => {
-  if (typeof window === "undefined") return null
-  const m = window.location.pathname.match(/\/v\/([^/]+)\/?$/i)
-  return m ? m[1] : null
 }
 async function fetchJSON(url) {
   const r = await fetch(url, { cache: "no-store" })
@@ -113,7 +104,9 @@ function AnyModel({ name, url, color, opacity, visible, onLoaded }) {
         } else {
           obj = await new OBJLoader().loadAsync(url)
           const mat = makeMaterial()
-          obj.traverse((child) => { if (child.isMesh) child.material = mat })
+          obj.traverse((child) => {
+            if (child.isMesh) child.material = mat
+          })
         }
         if (!cancelled) {
           setObject3D(obj)
@@ -126,13 +119,19 @@ function AnyModel({ name, url, color, opacity, visible, onLoaded }) {
       }
     })()
     return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [url, ext])
 
   useEffect(() => {
     if (!object3D) return
     const mat = makeMaterial()
-    if (object3D.isMesh) object3D.material = mat
-    else object3D.traverse((child) => { if (child.isMesh) child.material = mat })
+    if (object3D.isMesh) {
+      object3D.material = mat
+    } else {
+      object3D.traverse((child) => {
+        if (child.isMesh) child.material = mat
+      })
+    }
   }, [color, opacity, object3D])
 
   if (!object3D) return loading ? <InlineLoader text={`Načítám ${name || url}`} /> : null
@@ -164,7 +163,7 @@ function TouchTrackballControls({ target = [0, 0, 0] }) {
     }
   }, [camera, gl])
 
-  // target nastavíme jen při změně vstupu – panning pravým tlačítkem pak funguje
+  // ✅ target nastav jen při změně vstupu; pak ho necháme žít (pravé tlačítko – pan – funguje).
   useEffect(() => {
     if (!controlsRef.current) return
     controlsRef.current.target.set(target[0], target[1], target[2])
@@ -191,7 +190,7 @@ function AutoCenterAndFrame({
   isMobile = false,
   desktopScale = 0.4,
   mobileScale = 1.0,
-  centerMode = "combined",
+  centerMode = "combined", // "combined" | "per" | "none"
 }) {
   const { camera, size } = useThree()
 
@@ -244,7 +243,8 @@ function AutoCenterAndFrame({
     camera.zoom = Math.max(newZoom, 0.01)
     camera.position.set(ctr.x, ctr.y, ctr.z + Math.abs(camera.position.z))
     camera.updateProjectionMatrix()
-  }, [depsKey, size.width, size.height, isMobile, desktopScale, mobileScale, margin, centerMode, camera])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [depsKey, size.width, size.height, isMobile, desktopScale, mobileScale, margin, centerMode])
 
   return null
 }
@@ -300,6 +300,7 @@ function ColorSwatch({ color, onChange, ariaLabel }) {
 
 /* ---------- ClientPage ---------- */
 export default function ClientPage() {
+  // světla
   const [lightIntensity, setLightIntensity] = useState(1)
   const [lightPos1, setLightPos1] = useState({ x: 0, y: 5, z: 5 })
   const [lightPos2, setLightPos2] = useState({ x: -10, y: 0, z: 0 })
@@ -321,6 +322,7 @@ export default function ClientPage() {
     setIsMobile(uaMobile || coarse || narrow)
   }, [])
 
+  // data modelů + logo
   const [files, setFiles] = useState([])
   const [colors, setColors] = useState([])
   const [opacities, setOpacities] = useState([])
@@ -328,27 +330,23 @@ export default function ClientPage() {
   const [fatal, setFatal] = useState(null)
 
   const [logoCfg, setLogoCfg] = useState({ url: DEFAULT_LOGO, opacity: 0.9, width: 160, pos: "bc" })
-  const [titleCfg, setTitleCfg] = useState({ text: "", opacity: 0.9, color: "#ffffff", size: 18, pos: "tr" })
 
+  // Trackball target
   const [cameraTarget, setCameraTarget] = useState([0, 0, 0])
+
+  // načtené objekty count (trigger centra/fitu)
   const [loadedCount, setLoadedCount] = useState(0)
   const handleModelLoaded = () => setLoadedCount((n) => n + 1)
 
+  // parametr centrování
   const centerParam = (getParam("center") || "combined").toLowerCase()
   const centerMode = ["per", "combined", "none"].includes(centerParam) ? centerParam : "combined"
 
+  // init – manifest > files
   useEffect(() => {
     ;(async () => {
       try {
-        const pathId = getPathId()
-        const manifestParam = getParam("manifest") || getParam("m")
-        const manifestUrl =
-          manifestParam
-            ? decodeURIComponent(manifestParam)
-            : pathId
-            ? `${PUBLIC_SUPABASE_URL}/storage/v1/object/public/${PUBLIC_BUCKET}/viewer/${pathId}/manifest.json`
-            : null
-
+        const manifestUrl = getParam("manifest")
         if (manifestUrl) {
           const m = await fetchJSON(manifestUrl)
           const Fs = (m?.files || []).map((x, i) => ({
@@ -362,31 +360,37 @@ export default function ClientPage() {
           setColors(Fs.map((_, i) => palette[i % palette.length]))
           setOpacities(Fs.map(() => 1))
           setVisibles(Fs.map(() => true))
-
           const logoUrl = m?.logo?.url || DEFAULT_LOGO
-          setLogoCfg((prev) => ({
+          setLogoCfg({
             url: logoUrl || null,
-            opacity: clamp01(parseFloat(getParam("logoOpacity") ?? String(prev.opacity))),
-            width: parseInt(getParam("logoWidth") ?? (window.innerWidth < 768 ? "120" : String(prev.width)), 10),
-            pos: getParam("logoPos") || prev.pos,
-          }))
-
-          const titleText = (m?.title ?? getParam("title") ?? "").toString()
-          const tOpacity = clamp01(parseFloat(getParam("titleOpacity") ?? "0.9"))
-          const tColor = getParam("titleColor") || "#ffffff"
-          const tSize = parseInt(getParam("titleSize") ?? "18", 10)
-          const tPos = (getParam("titlePos") || "tr").toLowerCase()
-          setTitleCfg({
-            text: titleText,
-            opacity: isNaN(tOpacity) ? 0.9 : tOpacity,
-            color: tColor,
-            size: isNaN(tSize) ? 18 : tSize,
-            pos: ["tr", "tl", "br", "bl", "tc", "bc"].includes(tPos) ? tPos : "tr",
+            opacity: clamp01(parseFloat(getParam("logoOpacity") ?? "0.9")),
+            width: parseInt(getParam("logoWidth") ?? (window.innerWidth < 768 ? "120" : "160"), 10),
+            pos: getParam("logoPos") || "bc",
           })
           return
         }
 
-        // fallback dev
+        const f = getParam("files")
+        if (f) {
+          const arr = JSON.parse(decodeURIComponent(f))
+          const Fs = arr
+            .filter((x) => x && x.u)
+            .map((x, i) => ({ url: x.u, name: stripExt(x.n) || `Model ${i + 1}`, rawName: x.n }))
+          setFiles(Fs)
+          const palette = ["#f5f5dc", "#8e8e8e", "#ffffff", "#ffd7a8", "#c0c0c0", "#e6f0ff", "#ffeedd"]
+          setColors(Fs.map((_, i) => palette[i % palette.length]))
+          setOpacities(Fs.map(() => 1))
+          setVisibles(Fs.map(() => true))
+          setLogoCfg({
+            url: getParam("logo") === "none" ? null : getParam("logo") || DEFAULT_LOGO,
+            opacity: clamp01(parseFloat(getParam("logoOpacity") ?? "0.9")),
+            width: parseInt(getParam("logoWidth") ?? (window.innerWidth < 768 ? "120" : "160"), 10),
+            pos: getParam("logoPos") || "bc",
+          })
+          return
+        }
+
+        // dev fallback
         const Fs = [
           { url: "/models/Upper.obj", name: "Upper", rawName: "Upper.obj" },
           { url: "/models/Lower.stl", name: "Lower", rawName: "Lower.stl" },
@@ -403,6 +407,7 @@ export default function ClientPage() {
     })()
   }, [])
 
+  // LOGO pod scénou
   const logoEl = logoCfg.url && (
     <img
       src={logoCfg.url}
@@ -423,52 +428,19 @@ export default function ClientPage() {
     />
   )
 
-  const titleStylePos = (() => {
-    const base = { position: "absolute", zIndex: 0, pointerEvents: "none", userSelect: "none" }
-    switch (titleCfg.pos) {
-      case "tl": return { ...base, top: 12, left: 12 }
-      case "tr": return { ...base, top: 12, right: 12 }
-      case "bl": return { ...base, bottom: 12, left: 12 }
-      case "br": return { ...base, bottom: 12, right: 12 }
-      case "tc": return { ...base, top: 12, left: "50%", transform: "translateX(-50%)" }
-      case "bc": return { ...base, bottom: 12, left: "50%", transform: "translateX(-50%)" }
-      default: return { ...base, top: 12, right: 12 }
-    }
-  })()
-  const titleEl =
-    titleCfg.text && titleCfg.text.trim().length > 0 ? (
-      <div
-        style={{
-          ...titleStylePos,
-          color: titleCfg.color,
-          opacity: titleCfg.opacity,
-          fontSize: titleCfg.size,
-          fontFamily: "Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif",
-          fontWeight: 700,
-          letterSpacing: 0.3,
-          textShadow: "0 1px 2px rgba(0,0,0,.55)",
-          filter: "drop-shadow(0 0 1px rgba(0,0,0,.35))",
-          whiteSpace: "nowrap",
-          maxWidth: "60vw",
-          overflow: "hidden",
-          textOverflow: "ellipsis",
-        }}
-        title={titleCfg.text}
-      >
-        {titleCfg.text}
-      </div>
-    ) : null
-
+  // ref na root group v Canvasu
   const rootRef = useRef()
 
   return (
     <div className="stage" style={{ position: "relative", width: "100vw", height: "100vh", background: "black" }}>
       <PreloadIcons />
-      {logoEl}
-      {titleEl}
 
-      {/* UI panel (barvy/průhlednost/světla) */}
+      {/* LOGO pod scénou */}
+      {logoEl}
+
+      {/* Ovládací panel */}
       <div
+        className="controls-panel"
         style={{
           position: "absolute",
           top: 10,
@@ -489,21 +461,12 @@ export default function ClientPage() {
         }}
       >
         {fatal ? (
-          <div
-            style={{
-              color: "#ff8b8b",
-              background: "rgba(255, 0, 0, .08)",
-              border: "1px solid rgba(255, 0, 0, .35)",
-              padding: "8px 10px",
-              borderRadius: 10,
-            }}
-          >
-            {fatal}
-          </div>
+          <div style={{ color: "#ff8b8b" }}>{fatal}</div>
         ) : (
           files.map((f, i) => (
-            <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, margin: "6px 0" }}>
+            <div className="control-row" key={i} style={{ display: "flex", alignItems: "center", gap: 8, margin: "6px 0" }}>
               <div
+                className="row-label"
                 style={{ width: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
                 title={f.rawName || f.name}
               >
@@ -512,6 +475,7 @@ export default function ClientPage() {
               <ColorSwatch
                 color={colors[i] ?? "#ffffff"}
                 onChange={(c) => setColors((prev) => prev.map((v, idx) => (idx === i ? c : v)))}
+                ariaLabel={`${f.name} color`}
               />
               <input
                 className="slider"
@@ -527,6 +491,7 @@ export default function ClientPage() {
                 style={{ width: "var(--slider-width, 180px)" }}
               />
               <button
+                className={`toggle icon-btn ${visibles[i] ? "is-on" : "is-off"}`}
                 onClick={() => setVisibles((prev) => prev.map((v, idx) => (idx === i ? !v : v)))}
                 aria-label={visibles[i] ? `Hide ${f.name}` : `Show ${f.name}`}
                 style={{
@@ -551,30 +516,14 @@ export default function ClientPage() {
                   alt=""
                   width="20"
                   height="20"
-                  style={{
-                    position: "absolute",
-                    inset: 0,
-                    width: 20,
-                    height: 20,
-                    margin: "auto",
-                    opacity: visibles[i] ? 1 : 0,
-                    transition: "opacity .06s linear",
-                  }}
+                  style={{ position: "absolute", inset: 0, width: 20, height: 20, margin: "auto", opacity: visibles[i] ? 1 : 0, transition: "opacity .06s linear" }}
                 />
                 <img
                   src={ICONS.eyeOff}
                   alt=""
                   width="20"
                   height="20"
-                  style={{
-                    position: "absolute",
-                    inset: 0,
-                    width: 20,
-                    height: 20,
-                    margin: "auto",
-                    opacity: visibles[i] ? 0 : 1,
-                    transition: "opacity .06s linear",
-                  }}
+                  style={{ position: "absolute", inset: 0, width: 20, height: 20, margin: "auto", opacity: visibles[i] ? 0 : 1, transition: "opacity .06s linear" }}
                 />
               </button>
             </div>
@@ -585,6 +534,7 @@ export default function ClientPage() {
         {!fatal && (
           <>
             <button
+              className={`toggle arrow-toggle ${showLights ? "is-open" : "is-closed"}`}
               onClick={() => setShowLights(!showLights)}
               aria-label="Toggle lights panel"
               style={{
@@ -600,21 +550,21 @@ export default function ClientPage() {
                 cursor: "pointer",
               }}
             >
-              <span style={{ position: "relative", width: 16, height: 16, display: "inline-block" }}>
+              <span className="arrow-stack" aria-hidden style={{ position: "relative", width: 16, height: 16, display: "inline-block" }}>
                 <img src={ICONS.arrowClosed} width="16" height="16" style={{ position: "absolute", left: 0, top: 0, opacity: showLights ? 0 : 1 }} alt="" />
                 <img src={ICONS.arrowOpen} width="16" height="16" style={{ position: "absolute", left: 0, top: 0, opacity: showLights ? 1 : 0 }} alt="" />
               </span>
-              <span>Světla</span>
+              <span className="arrow-label">Světla</span>
             </button>
 
             {showLights && (
               <div style={{ marginTop: 8 }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
-                  <img src={ICONS.bulb} alt="" width="16" height="16" />
+                <div className="lights-row" style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+                  <img src={ICONS.bulb} alt="" width="16" height="16" style={{ width: 16, height: 16 }} />
                   <span>Light Intensity</span>
                 </div>
-                <div style={{ display: "flex", alignItems: "center", gap: 8, margin: "4px 0" }}>
-                  <span style={{ width: 18, textAlign: "right", color: "#fff", opacity: 0.9 }}>&nbsp;</span>
+                <div className="axis-row" style={{ display: "flex", alignItems: "center", gap: 8, margin: "4px 0" }}>
+                  <span className="axis-label" aria-hidden="true" style={{ width: 18, textAlign: "right", color: "#fff", opacity: 0.9 }}>&nbsp;</span>
                   <input className="slider" type="range" min={0} max={2} step={0.01} value={lightIntensity} onChange={(e) => setLightIntensity(parseFloat(e.target.value))} />
                 </div>
                 {[
@@ -624,13 +574,13 @@ export default function ClientPage() {
                   { label: "Light 4 Position", pos: lightPos4, setPos: setLightPos4 },
                 ].map((light, idx) => (
                   <div key={idx} style={{ marginTop: 10 }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
-                      <img src={ICONS.flashlight} alt="" width="16" height="16" />
+                    <div className="lights-row" style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+                      <img src={ICONS.flashlight} alt="" width="16" height="16" style={{ width: 16, height: 16 }} />
                       <span>{light.label}</span>
                     </div>
                     {["x", "y", "z"].map((axis) => (
-                      <div key={axis} style={{ display: "flex", alignItems: "center", gap: 8, margin: "4px 0" }}>
-                        <span style={{ width: 18, textAlign: "right", color: "#fff", opacity: 0.9 }}>{axis.toUpperCase()}:</span>
+                      <div className="axis-row" key={axis} style={{ display: "flex", alignItems: "center", gap: 8, margin: "4px 0" }}>
+                        <span className="axis-label" style={{ width: 18, textAlign: "right", color: "#fff", opacity: 0.9 }}>{axis.toUpperCase()}:</span>
                         <input
                           className="slider"
                           type="range"
@@ -683,6 +633,7 @@ export default function ClientPage() {
               </Suspense>
             </group>
 
+            {/* Auto-center/fit + Trackball (uvnitř Canvas) */}
             <AutoCenterAndFrame
               rootRef={rootRef}
               depsKey={loadedCount === files.length ? `ready-${files.length}` : `loading-${loadedCount}`}
