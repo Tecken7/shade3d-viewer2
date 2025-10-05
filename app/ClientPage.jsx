@@ -11,9 +11,6 @@ import { STLLoader } from "three/examples/jsm/loaders/STLLoader"
 import { PLYLoader } from "three/examples/jsm/loaders/PLYLoader"
 
 /* ---------- Public Supabase (pro hezké /v/:id odkazy) ---------- */
-/** Tohle jsou veřejné (ne-tajné) hodnoty: URL projektu a název public bucketu,
- *  kde se ukládá manifest:  /viewer/:id/manifest.json
- */
 const PUBLIC_SUPABASE_URL = "https://jqnkdjgmenerioodqcpa.supabase.co"
 const PUBLIC_BUCKET = "models"
 
@@ -194,7 +191,7 @@ function AutoCenterAndFrame({
   isMobile = false,
   desktopScale = 0.4,
   mobileScale = 1.0,
-  centerMode = "combined", // "combined" | "per" | "none"
+  centerMode = "combined",
 }) {
   const { camera, size } = useThree()
 
@@ -303,7 +300,6 @@ function ColorSwatch({ color, onChange, ariaLabel }) {
 
 /* ---------- ClientPage ---------- */
 export default function ClientPage() {
-  // světla
   const [lightIntensity, setLightIntensity] = useState(1)
   const [lightPos1, setLightPos1] = useState({ x: 0, y: 5, z: 5 })
   const [lightPos2, setLightPos2] = useState({ x: -10, y: 0, z: 0 })
@@ -325,7 +321,6 @@ export default function ClientPage() {
     setIsMobile(uaMobile || coarse || narrow)
   }, [])
 
-  // data modelů + logo + title
   const [files, setFiles] = useState([])
   const [colors, setColors] = useState([])
   const [opacities, setOpacities] = useState([])
@@ -335,24 +330,17 @@ export default function ClientPage() {
   const [logoCfg, setLogoCfg] = useState({ url: DEFAULT_LOGO, opacity: 0.9, width: 160, pos: "bc" })
   const [titleCfg, setTitleCfg] = useState({ text: "", opacity: 0.9, color: "#ffffff", size: 18, pos: "tr" })
 
-  // Trackball target
   const [cameraTarget, setCameraTarget] = useState([0, 0, 0])
-
-  // načtené objekty count (trigger centra/fitu)
   const [loadedCount, setLoadedCount] = useState(0)
   const handleModelLoaded = () => setLoadedCount((n) => n + 1)
 
-  // parametr centrování
   const centerParam = (getParam("center") || "combined").toLowerCase()
   const centerMode = ["per", "combined", "none"].includes(centerParam) ? centerParam : "combined"
 
-  // init – manifest > files + logo + title
   useEffect(() => {
     ;(async () => {
       try {
-        // 1) pěkná cesta /v/:id
         const pathId = getPathId()
-        // 2) query param ?manifest= / ?m= (dekódované)
         const manifestParam = getParam("manifest") || getParam("m")
         const manifestUrl =
           manifestParam
@@ -415,7 +403,6 @@ export default function ClientPage() {
     })()
   }, [])
 
-  // LOGO pod scénou (pod Canvas)
   const logoEl = logoCfg.url && (
     <img
       src={logoCfg.url}
@@ -436,7 +423,6 @@ export default function ClientPage() {
     />
   )
 
-  // TITLE pod scénou (pod Canvas)
   const titleStylePos = (() => {
     const base = { position: "absolute", zIndex: 0, pointerEvents: "none", userSelect: "none" }
     switch (titleCfg.pos) {
@@ -478,14 +464,11 @@ export default function ClientPage() {
   return (
     <div className="stage" style={{ position: "relative", width: "100vw", height: "100vh", background: "black" }}>
       <PreloadIcons />
-
-      {/* Overlays POD scénou */}
       {logoEl}
       {titleEl}
 
-      {/* Ovládací panel */}
+      {/* UI panel (barvy/průhlednost/světla) */}
       <div
-        className="controls-panel"
         style={{
           position: "absolute",
           top: 10,
@@ -529,7 +512,6 @@ export default function ClientPage() {
               <ColorSwatch
                 color={colors[i] ?? "#ffffff"}
                 onChange={(c) => setColors((prev) => prev.map((v, idx) => (idx === i ? c : v)))}
-                ariaLabel={`${f.name} color`}
               />
               <input
                 className="slider"
@@ -545,7 +527,6 @@ export default function ClientPage() {
                 style={{ width: "var(--slider-width, 180px)" }}
               />
               <button
-                className={`toggle icon-btn ${visibles[i] ? "is-on" : "is-off"}`}
                 onClick={() => setVisibles((prev) => prev.map((v, idx) => (idx === i ? !v : v)))}
                 aria-label={visibles[i] ? `Hide ${f.name}` : `Show ${f.name}`}
                 style={{
@@ -604,7 +585,6 @@ export default function ClientPage() {
         {!fatal && (
           <>
             <button
-              className={`toggle arrow-toggle ${showLights ? "is-open" : "is-closed"}`}
               onClick={() => setShowLights(!showLights)}
               aria-label="Toggle lights panel"
               style={{
@@ -630,7 +610,7 @@ export default function ClientPage() {
             {showLights && (
               <div style={{ marginTop: 8 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
-                  <img src={ICONS.bulb} alt="" width="16" height="16" style={{ width: 16, height: 16 }} />
+                  <img src={ICONS.bulb} alt="" width="16" height="16" />
                   <span>Light Intensity</span>
                 </div>
                 <div style={{ display: "flex", alignItems: "center", gap: 8, margin: "4px 0" }}>
@@ -645,7 +625,7 @@ export default function ClientPage() {
                 ].map((light, idx) => (
                   <div key={idx} style={{ marginTop: 10 }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
-                      <img src={ICONS.flashlight} alt="" width="16" height="16" style={{ width: 16, height: 16 }} />
+                      <img src={ICONS.flashlight} alt="" width="16" height="16" />
                       <span>{light.label}</span>
                     </div>
                     {["x", "y", "z"].map((axis) => (
