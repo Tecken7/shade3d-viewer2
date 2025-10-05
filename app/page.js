@@ -1,14 +1,16 @@
 "use client"
 
-export const dynamic = "force-dynamic" // vypnout prerender na buildu
+export const dynamic = "force-dynamic" // nevyrábět statickou HTML při buildu
 
-import { Canvas, useLoader, useThree, useFrame } from "@react-three/fiber"
+import { Canvas, useThree, useFrame } from "@react-three/fiber"
+import * as THREE from "three"
+import { Suspense, useEffect, useRef, useState, useMemo } from "react"
+import { HexColorPicker, HexColorInput } from "react-colorful"
+import { Html } from "@react-three/drei"
 import { TrackballControls } from "three/examples/jsm/controls/TrackballControls"
 import { OBJLoader } from "three/examples/jsm/loaders/OBJLoader"
-import * as THREE from "three"
-import { Suspense, useEffect, useRef, useState } from "react"
-import { Html, useProgress } from "@react-three/drei"
-import { HexColorPicker, HexColorInput } from "react-colorful"
+import { STLLoader } from "three/examples/jsm/loaders/STLLoader"
+import { PLYLoader } from "three/examples/jsm/loaders/PLYLoader"
 
 /* ---------- Ikony + preload ---------- */
 const ICONS = {
@@ -31,14 +33,10 @@ function PreloadIcons() {
 }
 
 /* ---------- Helpers ---------- */
-const DEFAULT_LOGO = "/Arthetic_logo.png" // výchozí logo
+const DEFAULT_LOGO = "/Arthetic_logo.png"
 
-function stripExt(s) {
-  return s?.replace(/\.[^.]+$/, "") || ""
-}
-function clamp01(x) {
-  return Math.max(0, Math.min(1, x))
-}
+function stripExt(s) { return s?.replace(/\.[^.]+$/, "") || "" }
+function clamp01(x) { return Math.max(0, Math.min(1, x)) }
 function getParam(name) {
   if (typeof window === "undefined") return null
   return new URL(window.location.href).searchParams.get(name)
@@ -48,53 +46,112 @@ async function fetchJSON(url) {
   if (!r.ok) throw new Error(`HTTP ${r.status}`)
   return r.json()
 }
+function inferExt(nameOrUrl) {
+  if (!nameOrUrl) return ""
+  let s = nameOrUrl.split("?")[0]
+  const m = s.match(/\.([a-z0-9]+)$/i)
+  return m ? m[1].toLowerCase() : ""
+}
 
-/* ---------- Loader ---------- */
-function Loader() {
-  const { progress } = useProgress()
+/* ---------- Loader (overlay text) ---------- */
+function InlineLoader({ text }) {
   return (
     <Html center>
       <div
         style={{
           background: "rgba(0,0,0,0.7)",
-          padding: "20px 40px",
-          borderRadius: "10px",
+          padding: "16px 28px",
+          borderRadius: 10,
           color: "white",
           fontFamily: "sans-serif",
-          fontSize: "18px",
+          fontSize: 16,
         }}
       >
-        ⏳ Načítání modelů: {Math.round(progress)} %
+        ⏳ {text || "Načítám…"}
       </div>
     </Html>
   )
 }
 
-/* ---------- 3D model ---------- */
-function Model({ url, color, opacity, visible, onLoaded }) {
-  const obj = useLoader(OBJLoader, url)
+/* ---------- Model (OBJ + STL + PLY) ---------- */
+function AnyModel({ name, url, color, opacity, visible, onLoaded }) {
+  const [object3D, setObject3D] = useState(null)
+  const [loading, setLoading] = useState(true)
+  const ext = useMemo(() => inferExt(name || url), [name, url])
+
+  const makeMaterial = () =>
+    new THREE.MeshStandardMaterial({
+      color: new THREE.Color(color),
+      transparent: opacity < 1,
+      opacity,
+      metalness: 0.5,
+      roughness: 0.5,
+      side: THREE.DoubleSide,
+      depthWrite: opacity === 1,
+    })
+
+  // načti jednou
   useEffect(() => {
-    if (obj && onLoaded) onLoaded(obj)
-  }, [obj, onLoaded])
-  const material = new THREE.MeshStandardMaterial({
-    color: new THREE.Color(color),
-    transparent: opacity < 1,
-    opacity,
-    metalness: 0.5,
-    roughness: 0.5,
-    side: THREE.DoubleSide,
-    depthWrite: opacity === 1,
-  })
-  obj.traverse((child) => {
-    if (child.isMesh) child.material = material
-  })
-  return visible ? <primitive object={obj} /> : null
+    let cancelled = false
+    setLoading(true)
+
+    const load = async () => {
+      try {
+        let obj
+        if (ext === "stl") {
+          const geom = await new STLLoader().loadAsync(url)
+          if (!geom.attributes.normal) geom.computeVertexNormals()
+          obj = new THREE.Mesh(geom, makeMaterial())
+        } else if (ext === "ply") {
+          const geom = await new PLYLoader().loadAsync(url)
+          if (!geom.attributes.normal) geom.computeVertexNormals()
+          obj = new THREE.Mesh(geom, makeMaterial())
+        } else {
+          // default + .obj
+          obj = await new OBJLoader().loadAsync(url)
+          const mat = makeMaterial()
+          obj.traverse((child) => {
+            if (child.isMesh) child.material = mat
+          })
+        }
+        if (!cancelled) {
+          setObject3D(obj)
+          setLoading(false)
+          onLoaded && onLoaded(obj)
+        }
+      } catch (e) {
+        if (!cancelled) setLoading(false)
+        console.error("Model load error:", e)
+      }
+    }
+    load()
+
+    return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [url, ext])
+
+  // re-aplikace materiálu při změně barvy/průhlednosti
+  useEffect(() => {
+    if (!object3D) return
+    const mat = makeMaterial()
+    if (object3D.isMesh) {
+      object3D.material = mat
+    } else {
+      object3D.traverse((child) => {
+        if (child.isMesh) child.material = mat
+      })
+    }
+  }, [color, opacity, object3D])
+
+  if (!object3D) return loading ? <InlineLoader text={`Načítám ${name || url}`} /> : null
+  return visible ? <primitive object={object3D} /> : null
 }
 
 /* ---------- Ovládání kamery ---------- */
 function TouchTrackballControls() {
   const { camera, gl } = useThree()
   const controlsRef = useRef(null)
+
   useEffect(() => {
     const controls = new TrackballControls(camera, gl.domElement)
     controls.rotateSpeed = 5.0
@@ -103,14 +160,8 @@ function TouchTrackballControls() {
     controls.staticMoving = true
     controlsRef.current = controls
 
-    const handleTouchStart = (e) => {
-      e.preventDefault()
-      controls.handleTouchStart(e)
-    }
-    const handleTouchMove = (e) => {
-      e.preventDefault()
-      controls.handleTouchMove(e)
-    }
+    const handleTouchStart = (e) => { e.preventDefault(); controls.handleTouchStart(e) }
+    const handleTouchMove = (e) => { e.preventDefault(); controls.handleTouchMove(e) }
     gl.domElement.addEventListener("touchstart", handleTouchStart, { passive: false })
     gl.domElement.addEventListener("touchmove", handleTouchMove, { passive: false })
 
@@ -127,7 +178,6 @@ function TouchTrackballControls() {
       controlsRef.current.update()
     }
   })
-
   return null
 }
 
@@ -179,9 +229,7 @@ function ColorSwatch({ color, onChange, ariaLabel }) {
   const [open, setOpen] = useState(false)
   const containerRef = useRef(null)
   useEffect(() => {
-    const onDocClick = (e) => {
-      if (open && containerRef.current && !containerRef.current.contains(e.target)) setOpen(false)
-    }
+    const onDocClick = (e) => { if (open && containerRef.current && !containerRef.current.contains(e.target)) setOpen(false) }
     document.addEventListener("mousedown", onDocClick)
     return () => document.removeEventListener("mousedown", onDocClick)
   }, [open])
@@ -192,27 +240,16 @@ function ColorSwatch({ color, onChange, ariaLabel }) {
         onClick={() => setOpen((v) => !v)}
         className="swatch-btn"
         style={{
-          width: 36,
-          height: 22,
-          borderRadius: 4,
-          border: "1px solid #fff",
-          background: color,
-          cursor: "pointer",
-          boxShadow: "0 0 0 1px rgba(0,0,0,.25) inset",
+          width: 36, height: 22, borderRadius: 4, border: "1px solid #fff",
+          background: color, cursor: "pointer", boxShadow: "0 0 0 1px rgba(0,0,0,.25) inset",
         }}
       />
       {open && (
         <div
           style={{
-            position: "absolute",
-            zIndex: 20,
-            top: 28,
-            left: 0,
-            background: "rgba(0,0,0,.92)",
-            padding: 12,
-            borderRadius: 10,
-            border: "1px solid rgba(255,255,255,.18)",
-            backdropFilter: "blur(4px)",
+            position: "absolute", zIndex: 20, top: 28, left: 0,
+            background: "rgba(0,0,0,.92)", padding: 12, borderRadius: 10,
+            border: "1px solid rgba(255,255,255,.18)", backdropFilter: "blur(4px)",
             boxShadow: "0 6px 24px rgba(0,0,0,.35)",
           }}
         >
@@ -224,14 +261,9 @@ function ColorSwatch({ color, onChange, ariaLabel }) {
               onChange={onChange}
               prefixed={false}
               style={{
-                width: 90,
-                padding: "4px 6px",
-                borderRadius: 6,
-                border: "1px solid #444",
-                background: "#111",
-                color: "#fff",
-                fontFamily: "monospace",
-                fontSize: 12,
+                width: 90, padding: "4px 6px", borderRadius: 6,
+                border: "1px solid #444", background: "#111", color: "#fff",
+                fontFamily: "monospace", fontSize: 12,
               }}
             />
           </div>
@@ -285,6 +317,7 @@ export default function Page() {
           const Fs = (m?.files || []).map((x, i) => ({
             url: x.u,
             name: stripExt(x.n) || `Model ${i + 1}`,
+            rawName: x.n,
           }))
           if (!Fs.length) throw new Error("Manifest je prázdný.")
           setFiles(Fs)
@@ -303,11 +336,12 @@ export default function Page() {
           return
         }
 
-        // fallback: files param (staré linky)
         const f = getParam("files")
         if (f) {
           const arr = JSON.parse(decodeURIComponent(f))
-          const Fs = arr.filter((x) => x && x.u).map((x, i) => ({ url: x.u, name: stripExt(x.n) || `Model ${i + 1}` }))
+          const Fs = arr
+            .filter((x) => x && x.u)
+            .map((x, i) => ({ url: x.u, name: stripExt(x.n) || `Model ${i + 1}`, rawName: x.n }))
           setFiles(Fs)
           const palette = ["#f5f5dc", "#8e8e8e", "#ffffff", "#ffd7a8", "#c0c0c0", "#e6f0ff", "#ffeedd"]
           setColors(Fs.map((_, i) => palette[i % palette.length]))
@@ -325,9 +359,9 @@ export default function Page() {
 
         // lokální fallback (dev)
         const Fs = [
-          { url: "/models/Upper.obj", name: "Upper" },
-          { url: "/models/Lower.obj", name: "Lower" },
-          { url: "/models/Crown21.obj", name: "Bridge" },
+          { url: "/models/Upper.obj", name: "Upper", rawName: "Upper.obj" },
+          { url: "/models/Lower.stl", name: "Lower", rawName: "Lower.stl" },
+          { url: "/models/Crown21.ply", name: "Bridge", rawName: "Crown21.ply" },
         ]
         setFiles(Fs)
         const palette = ["#f5f5dc", "#8e8e8e", "#ffffff"]
@@ -388,6 +422,7 @@ export default function Page() {
           border: "1px solid rgba(255,255,255,.15)",
           borderRadius: 8,
           padding: "10px 12px",
+          maxWidth: "46vw",
         }}
       >
         {fatal ? (
@@ -397,16 +432,14 @@ export default function Page() {
             <div className="control-row" key={i} style={{ display: "flex", alignItems: "center", gap: 8, margin: "6px 0" }}>
               <div
                 className="row-label"
-                style={{ width: 140, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
-                title={f.name}
+                style={{ width: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+                title={f.rawName || f.name}
               >
                 {f.name}:
               </div>
               <ColorSwatch
                 color={colors[i] ?? "#ffffff"}
-                onChange={(c) => {
-                  setColors((prev) => prev.map((v, idx) => (idx === i ? c : v)))
-                }}
+                onChange={(c) => setColors((prev) => prev.map((v, idx) => (idx === i ? c : v)))}
                 ariaLabel={`${f.name} color`}
               />
               <input
@@ -448,30 +481,14 @@ export default function Page() {
                   alt=""
                   width="20"
                   height="20"
-                  style={{
-                    position: "absolute",
-                    inset: 0,
-                    width: 20,
-                    height: 20,
-                    margin: "auto",
-                    opacity: visibles[i] ? 1 : 0,
-                    transition: "opacity .06s linear",
-                  }}
+                  style={{ position: "absolute", inset: 0, width: 20, height: 20, margin: "auto", opacity: visibles[i] ? 1 : 0, transition: "opacity .06s linear" }}
                 />
                 <img
                   src={ICONS.eyeOff}
                   alt=""
                   width="20"
                   height="20"
-                  style={{
-                    position: "absolute",
-                    inset: 0,
-                    width: 20,
-                    height: 20,
-                    margin: "auto",
-                    opacity: visibles[i] ? 0 : 1,
-                    transition: "opacity .06s linear",
-                  }}
+                  style={{ position: "absolute", inset: 0, width: 20, height: 20, margin: "auto", opacity: visibles[i] ? 0 : 1, transition: "opacity .06s linear" }}
                 />
               </button>
             </div>
@@ -499,24 +516,8 @@ export default function Page() {
               }}
             >
               <span className="arrow-stack" aria-hidden style={{ position: "relative", width: 16, height: 16, display: "inline-block" }}>
-                <img
-                  src={ICONS.arrowClosed}
-                  width="16"
-                  height="16"
-                  style={{ position: "absolute", left: 0, top: 0, width: 16, height: 16, opacity: showLights ? 0 : 1 }}
-                  loading="eager"
-                  decoding="async"
-                  alt=""
-                />
-                <img
-                  src={ICONS.arrowOpen}
-                  width="16"
-                  height="16"
-                  style={{ position: "absolute", left: 0, top: 0, width: 16, height: 16, opacity: showLights ? 1 : 0 }}
-                  loading="eager"
-                  decoding="async"
-                  alt=""
-                />
+                <img src={ICONS.arrowClosed} width="16" height="16" style={{ position: "absolute", left: 0, top: 0, opacity: showLights ? 0 : 1 }} alt="" />
+                <img src={ICONS.arrowOpen} width="16" height="16" style={{ position: "absolute", left: 0, top: 0, opacity: showLights ? 1 : 0 }} alt="" />
               </span>
               <span className="arrow-label">Světla</span>
             </button>
@@ -524,13 +525,11 @@ export default function Page() {
             {showLights && (
               <div style={{ marginTop: 8 }}>
                 <div className="lights-row" style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
-                  <img src={ICONS.bulb} alt="" width="16" height="16" style={{ width: 16, height: 16 }} loading="eager" decoding="async" />
+                  <img src={ICONS.bulb} alt="" width="16" height="16" style={{ width: 16, height: 16 }} />
                   <span>Light Intensity</span>
                 </div>
                 <div className="axis-row" style={{ display: "flex", alignItems: "center", gap: 8, margin: "4px 0" }}>
-                  <span className="axis-label" aria-hidden="true" style={{ width: 18, textAlign: "right", color: "#fff", opacity: 0.9 }}>
-                    &nbsp;
-                  </span>
+                  <span className="axis-label" aria-hidden="true" style={{ width: 18, textAlign: "right", color: "#fff", opacity: 0.9 }}>&nbsp;</span>
                   <input className="slider" type="range" min={0} max={2} step={0.01} value={lightIntensity} onChange={(e) => setLightIntensity(parseFloat(e.target.value))} />
                 </div>
                 {[
@@ -541,7 +540,7 @@ export default function Page() {
                 ].map((light, idx) => (
                   <div key={idx} style={{ marginTop: 10 }}>
                     <div className="lights-row" style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
-                      <img src={ICONS.flashlight} alt="" width="16" height="16" style={{ width: 16, height: 16 }} loading="eager" decoding="async" />
+                      <img src={ICONS.flashlight} alt="" width="16" height="16" style={{ width: 16, height: 16 }} />
                       <span>{light.label}</span>
                     </div>
                     {["x", "y", "z"].map((axis) => (
@@ -572,9 +571,7 @@ export default function Page() {
         orthographic
         camera={{ position: [0, 0, 100] }}
         gl={{ alpha: true }}
-        onCreated={({ gl }) => {
-          gl.setClearAlpha(0)
-        }}
+        onCreated={({ gl }) => gl.setClearAlpha(0)}
         style={{ position: "absolute", inset: 0, zIndex: 1, background: "transparent" }}
       >
         {!fatal && (
@@ -585,10 +582,12 @@ export default function Page() {
             <directionalLight position={[lightPos3.x, lightPos3.y, lightPos3.z]} intensity={lightIntensity * 1.2} />
             <directionalLight position={[lightPos4.x, lightPos4.y, lightPos4.z]} intensity={lightIntensity * 0.8} />
 
-            <Suspense fallback={<Loader />}>
+            {/* Naše vlastní loader je inline per-model */}
+            <Suspense fallback={null}>
               {files.map((f, i) => (
-                <Model
+                <AnyModel
                   key={i}
+                  name={f.rawName || f.name}
                   url={f.url}
                   color={colors[i] ?? "#ffffff"}
                   opacity={opacities[i] ?? 1}
@@ -612,45 +611,13 @@ export default function Page() {
         )}
       </Canvas>
 
-      {/* Globální styly */}
+      {/* Globální styly sliderů */}
       <style jsx global>{`
-        .slider {
-          appearance: none;
-          width: var(--slider-width, 180px);
-          height: 14px;
-          background: transparent;
-          margin: 5px 0;
-          display: inline-block;
-        }
-        .slider::-webkit-slider-runnable-track {
-          height: 4px;
-          background: white;
-          border-radius: 2px;
-        }
-        .slider::-webkit-slider-thumb {
-          appearance: none;
-          width: 14px;
-          height: 14px;
-          border-radius: 50%;
-          background: white;
-          cursor: pointer;
-          box-shadow: 0 0 2px black;
-          margin-top: -5px;
-        }
-        .slider::-moz-range-track {
-          height: 4px;
-          background: white;
-          border-radius: 2px;
-        }
-        .slider::-moz-range-thumb {
-          width: 14px;
-          height: 14px;
-          border-radius: 50%;
-          background: white;
-          cursor: pointer;
-          box-shadow: 0 0 2px black;
-          border: none;
-        }
+        .slider { appearance: none; width: var(--slider-width, 180px); height: 14px; background: transparent; margin: 5px 0; display: inline-block; }
+        .slider::-webkit-slider-runnable-track { height: 4px; background: white; border-radius: 2px; }
+        .slider::-webkit-slider-thumb { appearance: none; width: 14px; height: 14px; border-radius: 50%; background: white; cursor: pointer; box-shadow: 0 0 2px black; margin-top: -5px; }
+        .slider::-moz-range-track { height: 4px; background: white; border-radius: 2px; }
+        .slider::-moz-range-thumb { width: 14px; height: 14px; border-radius: 50%; background: white; cursor: pointer; box-shadow: 0 0 2px black; border: none; }
       `}</style>
     </div>
   )
