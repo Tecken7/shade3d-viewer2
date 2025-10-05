@@ -1,10 +1,10 @@
 "use client"
 
-export const dynamic = "force-dynamic" // nevyrábět statickou HTML při buildu
+export const dynamic = "force-dynamic"
 
 import { Canvas, useThree, useFrame } from "@react-three/fiber"
 import * as THREE from "three"
-import { Suspense, useEffect, useRef, useState, useMemo } from "react"
+import { Suspense, useEffect, useMemo, useRef, useState } from "react"
 import { HexColorPicker, HexColorInput } from "react-colorful"
 import { Html } from "@react-three/drei"
 import { TrackballControls } from "three/examples/jsm/controls/TrackballControls"
@@ -35,9 +35,9 @@ function PreloadIcons() {
 /* ---------- Helpers ---------- */
 const DEFAULT_LOGO = "/Arthetic_logo.png"
 
-function stripExt(s) { return s?.replace(/\.[^.]+$/, "") || "" }
-function clamp01(x) { return Math.max(0, Math.min(1, x)) }
-function getParam(name) {
+const stripExt = (s) => s?.replace(/\.[^.]+$/, "") || ""
+const clamp01 = (x) => Math.max(0, Math.min(1, x))
+const getParam = (name) => {
   if (typeof window === "undefined") return null
   return new URL(window.location.href).searchParams.get(name)
 }
@@ -48,12 +48,12 @@ async function fetchJSON(url) {
 }
 function inferExt(nameOrUrl) {
   if (!nameOrUrl) return ""
-  let s = nameOrUrl.split("?")[0]
+  const s = nameOrUrl.split("?")[0]
   const m = s.match(/\.([a-z0-9]+)$/i)
   return m ? m[1].toLowerCase() : ""
 }
 
-/* ---------- Loader (overlay text) ---------- */
+/* ---------- Loader (overlay) ---------- */
 function InlineLoader({ text }) {
   return (
     <Html center>
@@ -73,84 +73,11 @@ function InlineLoader({ text }) {
   )
 }
 
-/* ---------- Model (OBJ + STL + PLY) ---------- */
-function AnyModel({ name, url, color, opacity, visible, onLoaded }) {
-  const [object3D, setObject3D] = useState(null)
-  const [loading, setLoading] = useState(true)
-  const ext = useMemo(() => inferExt(name || url), [name, url])
-
-  const makeMaterial = () =>
-    new THREE.MeshStandardMaterial({
-      color: new THREE.Color(color),
-      transparent: opacity < 1,
-      opacity,
-      metalness: 0.5,
-      roughness: 0.5,
-      side: THREE.DoubleSide,
-      depthWrite: opacity === 1,
-    })
-
-  // načti jednou
-  useEffect(() => {
-    let cancelled = false
-    setLoading(true)
-
-    const load = async () => {
-      try {
-        let obj
-        if (ext === "stl") {
-          const geom = await new STLLoader().loadAsync(url)
-          if (!geom.attributes.normal) geom.computeVertexNormals()
-          obj = new THREE.Mesh(geom, makeMaterial())
-        } else if (ext === "ply") {
-          const geom = await new PLYLoader().loadAsync(url)
-          if (!geom.attributes.normal) geom.computeVertexNormals()
-          obj = new THREE.Mesh(geom, makeMaterial())
-        } else {
-          // default + .obj
-          obj = await new OBJLoader().loadAsync(url)
-          const mat = makeMaterial()
-          obj.traverse((child) => {
-            if (child.isMesh) child.material = mat
-          })
-        }
-        if (!cancelled) {
-          setObject3D(obj)
-          setLoading(false)
-          onLoaded && onLoaded(obj)
-        }
-      } catch (e) {
-        if (!cancelled) setLoading(false)
-        console.error("Model load error:", e)
-      }
-    }
-    load()
-
-    return () => { cancelled = true }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [url, ext])
-
-  // re-aplikace materiálu při změně barvy/průhlednosti
-  useEffect(() => {
-    if (!object3D) return
-    const mat = makeMaterial()
-    if (object3D.isMesh) {
-      object3D.material = mat
-    } else {
-      object3D.traverse((child) => {
-        if (child.isMesh) child.material = mat
-      })
-    }
-  }, [color, opacity, object3D])
-
-  if (!object3D) return loading ? <InlineLoader text={`Načítám ${name || url}`} /> : null
-  return visible ? <primitive object={object3D} /> : null
-}
-
-/* ---------- Ovládání kamery ---------- */
-function TouchTrackballControls() {
+/* ---------- Trackball s dynamickým targetem ---------- */
+function TouchTrackballControls({ target = [0, 0, 0] }) {
   const { camera, gl } = useThree()
   const controlsRef = useRef(null)
+  const targetVec = useMemo(() => new THREE.Vector3(...target), [target])
 
   useEffect(() => {
     const controls = new TrackballControls(camera, gl.domElement)
@@ -173,55 +100,159 @@ function TouchTrackballControls() {
   }, [camera, gl])
 
   useFrame(() => {
-    if (controlsRef.current && camera.isOrthographicCamera) {
+    if (!controlsRef.current) return
+    controlsRef.current.target.copy(targetVec)
+    if (camera.isOrthographicCamera) {
       controlsRef.current.panSpeed = camera.zoom * 0.4
-      controlsRef.current.update()
     }
+    controlsRef.current.update()
   })
+
   return null
 }
 
-/* ---------- Auto-fit kamery ---------- */
-function FitCameraOnLoad({
-  objects,
-  expectedCount = 1,
+/* ---------- Načtení libovolného 3D (OBJ/STL/PLY) ---------- */
+function AnyModel({ name, url, color, opacity, visible, onLoaded }) {
+  const [object3D, setObject3D] = useState(null)
+  const [loading, setLoading] = useState(true)
+  const ext = useMemo(() => inferExt(name || url), [name, url])
+
+  const makeMaterial = () =>
+    new THREE.MeshStandardMaterial({
+      color: new THREE.Color(color),
+      transparent: opacity < 1,
+      opacity,
+      metalness: 0.5,
+      roughness: 0.5,
+      side: THREE.DoubleSide,
+      depthWrite: opacity === 1,
+    })
+
+  useEffect(() => {
+    let cancelled = false
+    setLoading(true)
+    ;(async () => {
+      try {
+        let obj
+        if (ext === "stl") {
+          const geom = await new STLLoader().loadAsync(url)
+          if (!geom.attributes.normal) geom.computeVertexNormals()
+          obj = new THREE.Mesh(geom, makeMaterial())
+        } else if (ext === "ply") {
+          const geom = await new PLYLoader().loadAsync(url)
+          if (!geom.attributes.normal) geom.computeVertexNormals()
+          obj = new THREE.Mesh(geom, makeMaterial())
+        } else {
+          obj = await new OBJLoader().loadAsync(url)
+          const mat = makeMaterial()
+          obj.traverse((child) => {
+            if (child.isMesh) child.material = mat
+          })
+        }
+        if (!cancelled) {
+          setObject3D(obj)
+          setLoading(false)
+          onLoaded && onLoaded(obj)
+        }
+      } catch (e) {
+        if (!cancelled) setLoading(false)
+        console.error("Model load error:", e)
+      }
+    })()
+    return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [url, ext])
+
+  // re-aplikace materiálu při změně barvy/průhlednosti
+  useEffect(() => {
+    if (!object3D) return
+    const mat = makeMaterial()
+    if (object3D.isMesh) {
+      object3D.material = mat
+    } else {
+      object3D.traverse((child) => {
+        if (child.isMesh) child.material = mat
+      })
+    }
+  }, [color, opacity, object3D])
+
+  if (!object3D) return loading ? <InlineLoader text={`Načítám ${name || url}`} /> : null
+  return visible ? <primitive object={object3D} /> : null
+}
+
+/* ---------- Auto-center + auto-frame ---------- */
+function useAutoCenterAndFrame({
+  rootRef,
+  depsKey,
+  setTarget,
   margin = 1.2,
   isMobile = false,
   desktopScale = 0.4,
   mobileScale = 1.0,
+  centerMode = "combined", // "combined" | "per" | "none"
 }) {
   const { camera, size } = useThree()
-  const fitted = useRef(false)
 
   useEffect(() => {
-    if (fitted.current) return
-    if (!objects || objects.length < expectedCount) return
+    const root = rootRef.current
+    if (!root) return
 
-    const box = new THREE.Box3()
-    objects.forEach((obj) => box.expandByObject(obj))
-    if (box.isEmpty()) return
+    // 1) spočítej bbox celé scény (před posunem)
+    root.updateMatrixWorld(true)
+    const boxAll = new THREE.Box3().setFromObject(root)
+    if (boxAll.isEmpty()) return
 
-    const center = new THREE.Vector3()
+    const sizeAll = new THREE.Vector3()
+    const centerAll = new THREE.Vector3()
+    boxAll.getSize(sizeAll)
+    boxAll.getCenter(centerAll)
+
+    // 2) centrování
+    if (centerMode === "per") {
+      // každý child zvlášť na svůj střed
+      root.children.forEach((child) => {
+        const b = new THREE.Box3().setFromObject(child)
+        if (b.isEmpty()) return
+        const cWorld = new THREE.Vector3()
+        b.getCenter(cWorld)
+        // posuň child tak, aby jeho střed ležel v [0,0,0] rodiče
+        child.position.sub(cWorld)
+      })
+      root.updateMatrixWorld(true)
+      setTarget([0, 0, 0])
+    } else if (centerMode === "combined") {
+      // posuň celou scénu tak, aby společný střed byl v [0,0,0]
+      root.position.sub(centerAll)
+      root.updateMatrixWorld(true)
+      setTarget([0, 0, 0])
+    } else {
+      // bez posunu – target je skutečný střed v prostoru
+      setTarget([centerAll.x, centerAll.y, centerAll.z])
+    }
+
+    // 3) spočítej bbox znovu po centrování (pro storno perspektivy / zoom)
+    const boxAfter = new THREE.Box3().setFromObject(root)
     const dims = new THREE.Vector3()
-    box.getCenter(center)
-    box.getSize(dims)
+    const ctr = new THREE.Vector3()
+    boxAfter.getSize(dims)
+    boxAfter.getCenter(ctr)
 
-    camera.position.set(center.x, center.y, camera.position.z)
-
+    // 4) fit kamery (ortho) – X/Y určují zoom, Z zarovnáme k centru kvůli clipům
     const objW = Math.max(dims.x, 1e-6)
     const objH = Math.max(dims.y, 1e-6)
     const zoomX = size.width / (objW * margin)
     const zoomY = size.height / (objH * margin)
     let newZoom = Math.min(zoomX, zoomY)
-
     newZoom *= isMobile ? mobileScale : desktopScale
+
+    // rozumné limity pro ortho
+    camera.near = -1_000_000
+    camera.far = 1_000_000
     camera.zoom = Math.max(newZoom, 0.01)
+    camera.position.set(ctr.x, ctr.y, ctr.z + Math.abs(camera.position.z)) // držíme “vzdálenost”, cílíme na střed
     camera.updateProjectionMatrix()
-
-    fitted.current = true
-  }, [objects, expectedCount, margin, isMobile, desktopScale, mobileScale, camera, size.width, size.height])
-
-  return null
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rootRef, depsKey, size.width, size.height, isMobile, desktopScale, mobileScale, margin, centerMode])
 }
 
 /* ---------- Color popover ---------- */
@@ -297,15 +328,31 @@ export default function Page() {
     setIsMobile(uaMobile || coarse || narrow)
   }, [])
 
-  // dynamické modely + logo
+  // data modelů + logo
   const [files, setFiles] = useState([])
   const [colors, setColors] = useState([])
   const [opacities, setOpacities] = useState([])
   const [visibles, setVisibles] = useState([])
-  const [loadedObjects, setLoadedObjects] = useState([])
+  const [fatal, setFatal] = useState(null)
 
   const [logoCfg, setLogoCfg] = useState({ url: DEFAULT_LOGO, opacity: 0.9, width: 160, pos: "bc" })
-  const [fatal, setFatal] = useState(null)
+
+  // Trackball target
+  const [cameraTarget, setCameraTarget] = useState([0, 0, 0])
+
+  // načtené objekty (pro “ready” trigger)
+  const [loadedObjects, setLoadedObjects] = useState([])
+
+  const handleModelLoaded = (obj) => {
+    setLoadedObjects((prev) => (prev.includes(obj) ? prev : [...prev, obj]))
+  }
+
+  // top-level group, kterou případně posouváme
+  const rootRef = useRef()
+
+  // Parametr centrování
+  const centerParam = (getParam("center") || "combined").toLowerCase()
+  const centerMode = ["per", "combined", "none"].includes(centerParam) ? centerParam : "combined"
 
   // init – manifest > files
   useEffect(() => {
@@ -325,7 +372,6 @@ export default function Page() {
           setColors(Fs.map((_, i) => palette[i % palette.length]))
           setOpacities(Fs.map(() => 1))
           setVisibles(Fs.map(() => true))
-          setLoadedObjects([])
           const logoUrl = m?.logo?.url || DEFAULT_LOGO
           setLogoCfg({
             url: logoUrl || null,
@@ -347,7 +393,6 @@ export default function Page() {
           setColors(Fs.map((_, i) => palette[i % palette.length]))
           setOpacities(Fs.map(() => 1))
           setVisibles(Fs.map(() => true))
-          setLoadedObjects([])
           setLogoCfg({
             url: getParam("logo") === "none" ? null : getParam("logo") || DEFAULT_LOGO,
             opacity: clamp01(parseFloat(getParam("logoOpacity") ?? "0.9")),
@@ -357,7 +402,7 @@ export default function Page() {
           return
         }
 
-        // lokální fallback (dev)
+        // dev fallback
         const Fs = [
           { url: "/models/Upper.obj", name: "Upper", rawName: "Upper.obj" },
           { url: "/models/Lower.stl", name: "Lower", rawName: "Lower.stl" },
@@ -374,9 +419,17 @@ export default function Page() {
     })()
   }, [])
 
-  const handleModelLoaded = (obj) => {
-    setLoadedObjects((prev) => (prev.includes(obj) ? prev : [...prev, obj]))
-  }
+  // Po načtení všech objektů: auto-center + auto-frame
+  useAutoCenterAndFrame({
+    rootRef,
+    depsKey: loadedObjects.length === files.length ? `ready-${files.length}` : "loading",
+    setTarget: setCameraTarget,
+    margin: 1.2,
+    isMobile,
+    desktopScale: 0.4,
+    mobileScale: 1.0,
+    centerMode, // "combined" | "per" | "none"
+  })
 
   return (
     <div className="stage" style={{ position: "relative", width: "100vw", height: "100vh", background: "black" }}>
@@ -403,7 +456,7 @@ export default function Page() {
         />
       )}
 
-      {/* Panel */}
+      {/* Ovládací panel */}
       <div
         className="controls-panel"
         style={{
@@ -435,7 +488,7 @@ export default function Page() {
                 style={{ width: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
                 title={f.rawName || f.name}
               >
-                {f.name}:
+                {stripExt(f.name)}:
               </div>
               <ColorSwatch
                 color={colors[i] ?? "#ffffff"}
@@ -569,7 +622,7 @@ export default function Page() {
       {/* SCÉNA */}
       <Canvas
         orthographic
-        camera={{ position: [0, 0, 100] }}
+        camera={{ position: [0, 0, 100], near: -100000, far: 100000 }}
         gl={{ alpha: true }}
         onCreated={({ gl }) => gl.setClearAlpha(0)}
         style={{ position: "absolute", inset: 0, zIndex: 1, background: "transparent" }}
@@ -582,31 +635,24 @@ export default function Page() {
             <directionalLight position={[lightPos3.x, lightPos3.y, lightPos3.z]} intensity={lightIntensity * 1.2} />
             <directionalLight position={[lightPos4.x, lightPos4.y, lightPos4.z]} intensity={lightIntensity * 0.8} />
 
-            {/* Naše vlastní loader je inline per-model */}
-            <Suspense fallback={null}>
-              {files.map((f, i) => (
-                <AnyModel
-                  key={i}
-                  name={f.rawName || f.name}
-                  url={f.url}
-                  color={colors[i] ?? "#ffffff"}
-                  opacity={opacities[i] ?? 1}
-                  visible={visibles[i] ?? true}
-                  onLoaded={handleModelLoaded}
-                />
-              ))}
-            </Suspense>
+            <group ref={rootRef}>
+              <Suspense fallback={null}>
+                {files.map((f, i) => (
+                  <AnyModel
+                    key={i}
+                    name={f.rawName || f.name}
+                    url={f.url}
+                    color={colors[i] ?? "#ffffff"}
+                    opacity={opacities[i] ?? 1}
+                    visible={visibles[i] ?? true}
+                    onLoaded={handleModelLoaded}
+                  />
+                ))}
+              </Suspense>
+            </group>
 
-            <FitCameraOnLoad
-              objects={loadedObjects}
-              expectedCount={Math.max(1, files.length)}
-              margin={1.2}
-              isMobile={isMobile}
-              desktopScale={0.4}
-              mobileScale={1.0}
-            />
-
-            <TouchTrackballControls />
+            {/* Trackball s aktuálním středem */}
+            <TouchTrackballControls target={cameraTarget} />
           </>
         )}
       </Canvas>
