@@ -10,6 +10,13 @@ import { OBJLoader } from "three/examples/jsm/loaders/OBJLoader"
 import { STLLoader } from "three/examples/jsm/loaders/STLLoader"
 import { PLYLoader } from "three/examples/jsm/loaders/PLYLoader"
 
+/* ---------- Public Supabase (pro hezké /v/:id odkazy) ---------- */
+/** Tohle jsou veřejné (ne-tajné) hodnoty: URL projektu a název public bucketu,
+ *  kde se ukládá manifest:  /viewer/:id/manifest.json
+ */
+const PUBLIC_SUPABASE_URL = "https://jqnkdjgmenerioodqcpa.supabase.co"
+const PUBLIC_BUCKET = "models"
+
 /* ---------- Ikony + preload ---------- */
 const ICONS = {
   eye: "/icons/Eye.png",
@@ -37,6 +44,11 @@ const clamp01 = (x) => Math.max(0, Math.min(1, x))
 const getParam = (name) => {
   if (typeof window === "undefined") return null
   return new URL(window.location.href).searchParams.get(name)
+}
+const getPathId = () => {
+  if (typeof window === "undefined") return null
+  const m = window.location.pathname.match(/\/v\/([^/]+)\/?$/i)
+  return m ? m[1] : null
 }
 async function fetchJSON(url) {
   const r = await fetch(url, { cache: "no-store" })
@@ -104,9 +116,7 @@ function AnyModel({ name, url, color, opacity, visible, onLoaded }) {
         } else {
           obj = await new OBJLoader().loadAsync(url)
           const mat = makeMaterial()
-          obj.traverse((child) => {
-            if (child.isMesh) child.material = mat
-          })
+          obj.traverse((child) => { if (child.isMesh) child.material = mat })
         }
         if (!cancelled) {
           setObject3D(obj)
@@ -118,22 +128,14 @@ function AnyModel({ name, url, color, opacity, visible, onLoaded }) {
         console.error("Model load error:", e)
       }
     })()
-    return () => {
-      cancelled = true
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    return () => { cancelled = true }
   }, [url, ext])
 
   useEffect(() => {
     if (!object3D) return
     const mat = makeMaterial()
-    if (object3D.isMesh) {
-      object3D.material = mat
-    } else {
-      object3D.traverse((child) => {
-        if (child.isMesh) child.material = mat
-      })
-    }
+    if (object3D.isMesh) object3D.material = mat
+    else object3D.traverse((child) => { if (child.isMesh) child.material = mat })
   }, [color, opacity, object3D])
 
   if (!object3D) return loading ? <InlineLoader text={`Načítám ${name || url}`} /> : null
@@ -153,14 +155,8 @@ function TouchTrackballControls({ target = [0, 0, 0] }) {
     controls.staticMoving = true
     controlsRef.current = controls
 
-    const handleTouchStart = (e) => {
-      e.preventDefault()
-      controls.handleTouchStart(e)
-    }
-    const handleTouchMove = (e) => {
-      e.preventDefault()
-      controls.handleTouchMove(e)
-    }
+    const handleTouchStart = (e) => { e.preventDefault(); controls.handleTouchStart(e) }
+    const handleTouchMove = (e) => { e.preventDefault(); controls.handleTouchMove(e) }
     gl.domElement.addEventListener("touchstart", handleTouchStart, { passive: false })
     gl.domElement.addEventListener("touchmove", handleTouchMove, { passive: false })
 
@@ -261,9 +257,7 @@ function ColorSwatch({ color, onChange, ariaLabel }) {
   const [open, setOpen] = useState(false)
   const containerRef = useRef(null)
   useEffect(() => {
-    const onDocClick = (e) => {
-      if (open && containerRef.current && !containerRef.current.contains(e.target)) setOpen(false)
-    }
+    const onDocClick = (e) => { if (open && containerRef.current && !containerRef.current.contains(e.target)) setOpen(false) }
     document.addEventListener("mousedown", onDocClick)
     return () => document.removeEventListener("mousedown", onDocClick)
   }, [open])
@@ -274,27 +268,16 @@ function ColorSwatch({ color, onChange, ariaLabel }) {
         onClick={() => setOpen((v) => !v)}
         className="swatch-btn"
         style={{
-          width: 36,
-          height: 22,
-          borderRadius: 4,
-          border: "1px solid #fff",
-          background: color,
-          cursor: "pointer",
-          boxShadow: "0 0 0 1px rgba(0,0,0,.25) inset",
+          width: 36, height: 22, borderRadius: 4, border: "1px solid #fff",
+          background: color, cursor: "pointer", boxShadow: "0 0 0 1px rgba(0,0,0,.25) inset",
         }}
       />
       {open && (
         <div
           style={{
-            position: "absolute",
-            zIndex: 20,
-            top: 28,
-            left: 0,
-            background: "rgba(0,0,0,.92)",
-            padding: 12,
-            borderRadius: 10,
-            border: "1px solid rgba(255,255,255,.18)",
-            backdropFilter: "blur(4px)",
+            position: "absolute", zIndex: 20, top: 28, left: 0,
+            background: "rgba(0,0,0,.92)", padding: 12, borderRadius: 10,
+            border: "1px solid rgba(255,255,255,.18)", backdropFilter: "blur(4px)",
             boxShadow: "0 6px 24px rgba(0,0,0,.35)",
           }}
         >
@@ -306,14 +289,9 @@ function ColorSwatch({ color, onChange, ariaLabel }) {
               onChange={onChange}
               prefixed={false}
               style={{
-                width: 90,
-                padding: "4px 6px",
-                borderRadius: 6,
-                border: "1px solid #444",
-                background: "#111",
-                color: "#fff",
-                fontFamily: "monospace",
-                fontSize: 12,
+                width: 90, padding: "4px 6px", borderRadius: 6,
+                border: "1px solid #444", background: "#111", color: "#fff",
+                fontFamily: "monospace", fontSize: 12,
               }}
             />
           </div>
@@ -342,8 +320,7 @@ export default function ClientPage() {
   const [isMobile, setIsMobile] = useState(false)
   useEffect(() => {
     const uaMobile = /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent)
-    const coarse =
-      typeof window !== "undefined" && window.matchMedia && window.matchMedia("(pointer: coarse)").matches
+    const coarse = typeof window !== "undefined" && window.matchMedia && window.matchMedia("(pointer: coarse)").matches
     const narrow = typeof window !== "undefined" && window.innerWidth < 768
     setIsMobile(uaMobile || coarse || narrow)
   }, [])
@@ -356,13 +333,7 @@ export default function ClientPage() {
   const [fatal, setFatal] = useState(null)
 
   const [logoCfg, setLogoCfg] = useState({ url: DEFAULT_LOGO, opacity: 0.9, width: 160, pos: "bc" })
-  const [titleCfg, setTitleCfg] = useState({
-    text: "",
-    opacity: 0.9,
-    color: "#ffffff",
-    size: 18,
-    pos: "tr",
-  })
+  const [titleCfg, setTitleCfg] = useState({ text: "", opacity: 0.9, color: "#ffffff", size: 18, pos: "tr" })
 
   // Trackball target
   const [cameraTarget, setCameraTarget] = useState([0, 0, 0])
@@ -379,9 +350,16 @@ export default function ClientPage() {
   useEffect(() => {
     ;(async () => {
       try {
-        // ✅ bereme i alias "?m=" a hlavně DEKÓDUJEME param
+        // 1) pěkná cesta /v/:id
+        const pathId = getPathId()
+        // 2) query param ?manifest= / ?m= (dekódované)
         const manifestParam = getParam("manifest") || getParam("m")
-        const manifestUrl = manifestParam ? decodeURIComponent(manifestParam) : null
+        const manifestUrl =
+          manifestParam
+            ? decodeURIComponent(manifestParam)
+            : pathId
+            ? `${PUBLIC_SUPABASE_URL}/storage/v1/object/public/${PUBLIC_BUCKET}/viewer/${pathId}/manifest.json`
+            : null
 
         if (manifestUrl) {
           const m = await fetchJSON(manifestUrl)
@@ -398,12 +376,12 @@ export default function ClientPage() {
           setVisibles(Fs.map(() => true))
 
           const logoUrl = m?.logo?.url || DEFAULT_LOGO
-          setLogoCfg({
+          setLogoCfg((prev) => ({
             url: logoUrl || null,
-            opacity: clamp01(parseFloat(getParam("logoOpacity") ?? "0.9")),
-            width: parseInt(getParam("logoWidth") ?? (window.innerWidth < 768 ? "120" : "160"), 10),
-            pos: getParam("logoPos") || "bc",
-          })
+            opacity: clamp01(parseFloat(getParam("logoOpacity") ?? String(prev.opacity))),
+            width: parseInt(getParam("logoWidth") ?? (window.innerWidth < 768 ? "120" : String(prev.width)), 10),
+            pos: getParam("logoPos") || prev.pos,
+          }))
 
           const titleText = (m?.title ?? getParam("title") ?? "").toString()
           const tOpacity = clamp01(parseFloat(getParam("titleOpacity") ?? "0.9"))
@@ -420,42 +398,7 @@ export default function ClientPage() {
           return
         }
 
-        // alternativně raw ?files=[...]
-        const f = getParam("files")
-        if (f) {
-          const arr = JSON.parse(decodeURIComponent(f))
-          const Fs = arr
-            .filter((x) => x && x.u)
-            .map((x, i) => ({ url: x.u, name: stripExt(x.n) || `Model ${i + 1}`, rawName: x.n }))
-          setFiles(Fs)
-          const palette = ["#f5f5dc", "#8e8e8e", "#ffffff", "#ffd7a8", "#c0c0c0", "#e6f0ff", "#ffeedd"]
-          setColors(Fs.map((_, i) => palette[i % palette.length]))
-          setOpacities(Fs.map(() => 1))
-          setVisibles(Fs.map(() => true))
-
-          setLogoCfg({
-            url: getParam("logo") === "none" ? null : getParam("logo") || DEFAULT_LOGO,
-            opacity: clamp01(parseFloat(getParam("logoOpacity") ?? "0.9")),
-            width: parseInt(getParam("logoWidth") ?? (window.innerWidth < 768 ? "120" : "160"), 10),
-            pos: getParam("logoPos") || "bc",
-          })
-
-          const titleText = (getParam("title") ?? "").toString()
-          const tOpacity = clamp01(parseFloat(getParam("titleOpacity") ?? "0.9"))
-          const tColor = getParam("titleColor") || "#ffffff"
-          const tSize = parseInt(getParam("titleSize") ?? "18", 10)
-          const tPos = (getParam("titlePos") || "tr").toLowerCase()
-          setTitleCfg({
-            text: titleText,
-            opacity: isNaN(tOpacity) ? 0.9 : tOpacity,
-            color: tColor,
-            size: isNaN(tSize) ? 18 : tSize,
-            pos: ["tr", "tl", "br", "bl", "tc", "bc"].includes(tPos) ? tPos : "tr",
-          })
-          return
-        }
-
-        // dev fallback
+        // fallback dev
         const Fs = [
           { url: "/models/Upper.obj", name: "Upper", rawName: "Upper.obj" },
           { url: "/models/Lower.stl", name: "Lower", rawName: "Lower.stl" },
@@ -493,24 +436,17 @@ export default function ClientPage() {
     />
   )
 
-  // TITLE pod scénou (pod Canvas), default top-right
+  // TITLE pod scénou (pod Canvas)
   const titleStylePos = (() => {
     const base = { position: "absolute", zIndex: 0, pointerEvents: "none", userSelect: "none" }
     switch (titleCfg.pos) {
-      case "tl":
-        return { ...base, top: 12, left: 12 }
-      case "tr":
-        return { ...base, top: 12, right: 12 }
-      case "bl":
-        return { ...base, bottom: 12, left: 12 }
-      case "br":
-        return { ...base, bottom: 12, right: 12 }
-      case "tc":
-        return { ...base, top: 12, left: "50%", transform: "translateX(-50%)" }
-      case "bc":
-        return { ...base, bottom: 12, left: "50%", transform: "translateX(-50%)" }
-      default:
-        return { ...base, top: 12, right: 12 }
+      case "tl": return { ...base, top: 12, left: 12 }
+      case "tr": return { ...base, top: 12, right: 12 }
+      case "bl": return { ...base, bottom: 12, left: 12 }
+      case "br": return { ...base, bottom: 12, right: 12 }
+      case "tc": return { ...base, top: 12, left: "50%", transform: "translateX(-50%)" }
+      case "bc": return { ...base, bottom: 12, left: "50%", transform: "translateX(-50%)" }
+      default: return { ...base, top: 12, right: 12 }
     }
   })()
   const titleEl =
@@ -537,7 +473,6 @@ export default function ClientPage() {
       </div>
     ) : null
 
-  // ref na root group v Canvasu
   const rootRef = useRef()
 
   return (
@@ -584,13 +519,8 @@ export default function ClientPage() {
           </div>
         ) : (
           files.map((f, i) => (
-            <div
-              className="control-row"
-              key={i}
-              style={{ display: "flex", alignItems: "center", gap: 8, margin: "6px 0" }}
-            >
+            <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, margin: "6px 0" }}>
               <div
-                className="row-label"
                 style={{ width: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
                 title={f.rawName || f.name}
               >
@@ -690,55 +620,22 @@ export default function ClientPage() {
                 cursor: "pointer",
               }}
             >
-              <span
-                className="arrow-stack"
-                aria-hidden
-                style={{ position: "relative", width: 16, height: 16, display: "inline-block" }}
-              >
-                <img
-                  src={ICONS.arrowClosed}
-                  width="16"
-                  height="16"
-                  style={{ position: "absolute", left: 0, top: 0, opacity: showLights ? 0 : 1 }}
-                  alt=""
-                />
-                <img
-                  src={ICONS.arrowOpen}
-                  width="16"
-                  height="16"
-                  style={{ position: "absolute", left: 0, top: 0, opacity: showLights ? 1 : 0 }}
-                  alt=""
-                />
+              <span style={{ position: "relative", width: 16, height: 16, display: "inline-block" }}>
+                <img src={ICONS.arrowClosed} width="16" height="16" style={{ position: "absolute", left: 0, top: 0, opacity: showLights ? 0 : 1 }} alt="" />
+                <img src={ICONS.arrowOpen} width="16" height="16" style={{ position: "absolute", left: 0, top: 0, opacity: showLights ? 1 : 0 }} alt="" />
               </span>
-              <span className="arrow-label">Světla</span>
+              <span>Světla</span>
             </button>
 
             {showLights && (
               <div style={{ marginTop: 8 }}>
-                <div
-                  className="lights-row"
-                  style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}
-                >
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
                   <img src={ICONS.bulb} alt="" width="16" height="16" style={{ width: 16, height: 16 }} />
                   <span>Light Intensity</span>
                 </div>
-                <div className="axis-row" style={{ display: "flex", alignItems: "center", gap: 8, margin: "4px 0" }}>
-                  <span
-                    className="axis-label"
-                    aria-hidden="true"
-                    style={{ width: 18, textAlign: "right", color: "#fff", opacity: 0.9 }}
-                  >
-                    &nbsp;
-                  </span>
-                  <input
-                    className="slider"
-                    type="range"
-                    min={0}
-                    max={2}
-                    step={0.01}
-                    value={lightIntensity}
-                    onChange={(e) => setLightIntensity(parseFloat(e.target.value))}
-                  />
+                <div style={{ display: "flex", alignItems: "center", gap: 8, margin: "4px 0" }}>
+                  <span style={{ width: 18, textAlign: "right", color: "#fff", opacity: 0.9 }}>&nbsp;</span>
+                  <input className="slider" type="range" min={0} max={2} step={0.01} value={lightIntensity} onChange={(e) => setLightIntensity(parseFloat(e.target.value))} />
                 </div>
                 {[
                   { label: "Light 1 Position", pos: lightPos1, setPos: setLightPos1 },
@@ -747,25 +644,13 @@ export default function ClientPage() {
                   { label: "Light 4 Position", pos: lightPos4, setPos: setLightPos4 },
                 ].map((light, idx) => (
                   <div key={idx} style={{ marginTop: 10 }}>
-                    <div
-                      className="lights-row"
-                      style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}
-                    >
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
                       <img src={ICONS.flashlight} alt="" width="16" height="16" style={{ width: 16, height: 16 }} />
                       <span>{light.label}</span>
                     </div>
                     {["x", "y", "z"].map((axis) => (
-                      <div
-                        className="axis-row"
-                        key={axis}
-                        style={{ display: "flex", alignItems: "center", gap: 8, margin: "4px 0" }}
-                      >
-                        <span
-                          className="axis-label"
-                          style={{ width: 18, textAlign: "right", color: "#fff", opacity: 0.9 }}
-                        >
-                          {axis.toUpperCase()}:
-                        </span>
+                      <div key={axis} style={{ display: "flex", alignItems: "center", gap: 8, margin: "4px 0" }}>
+                        <span style={{ width: 18, textAlign: "right", color: "#fff", opacity: 0.9 }}>{axis.toUpperCase()}:</span>
                         <input
                           className="slider"
                           type="range"
@@ -818,7 +703,6 @@ export default function ClientPage() {
               </Suspense>
             </group>
 
-            {/* Auto-center/fit + Trackball (uvnitř Canvas) */}
             <AutoCenterAndFrame
               rootRef={rootRef}
               depsKey={loadedCount === files.length ? `ready-${files.length}` : `loading-${loadedCount}`}
@@ -836,46 +720,11 @@ export default function ClientPage() {
 
       {/* Globální styly sliderů */}
       <style jsx global>{`
-        .slider {
-          -webkit-appearance: none;
-          -moz-appearance: none;
-          appearance: none;
-          width: var(--slider-width, 180px);
-          height: 14px;
-          background: transparent;
-          margin: 5px 0;
-          display: inline-block;
-        }
-        .slider::-webkit-slider-runnable-track {
-          height: 4px;
-          background: white;
-          border-radius: 2px;
-        }
-        .slider::-webkit-slider-thumb {
-          -webkit-appearance: none;
-          appearance: none;
-          width: 14px;
-          height: 14px;
-          border-radius: 50%;
-          background: white;
-          cursor: pointer;
-          box-shadow: 0 0 2px black;
-          margin-top: -5px;
-        }
-        .slider::-moz-range-track {
-          height: 4px;
-          background: white;
-          border-radius: 2px;
-        }
-        .slider::-moz-range-thumb {
-          width: 14px;
-          height: 14px;
-          border-radius: 50%;
-          background: white;
-          cursor: pointer;
-          box-shadow: 0 0 2px black;
-          border: none;
-        }
+        .slider { appearance: none; width: var(--slider-width, 180px); height: 14px; background: transparent; margin: 5px 0; display: inline-block; }
+        .slider::-webkit-slider-runnable-track { height: 4px; background: white; border-radius: 2px; }
+        .slider::-webkit-slider-thumb { appearance: none; width: 14px; height: 14px; border-radius: 50%; background: white; cursor: pointer; box-shadow: 0 0 2px black; margin-top: -5px; }
+        .slider::-moz-range-track { height: 4px; background: white; border-radius: 2px; }
+        .slider::-moz-range-thumb { width: 14px; height: 14px; border-radius: 50%; background: white; cursor: pointer; box-shadow: 0 0 2px black; border: none; }
       `}</style>
     </div>
   )
