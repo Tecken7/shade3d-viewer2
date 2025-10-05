@@ -104,9 +104,7 @@ function AnyModel({ name, url, color, opacity, visible, onLoaded }) {
         } else {
           obj = await new OBJLoader().loadAsync(url)
           const mat = makeMaterial()
-          obj.traverse((child) => {
-            if (child.isMesh) child.material = mat
-          })
+          obj.traverse((child) => { if (child.isMesh) child.material = mat })
         }
         if (!cancelled) {
           setObject3D(obj)
@@ -125,13 +123,8 @@ function AnyModel({ name, url, color, opacity, visible, onLoaded }) {
   useEffect(() => {
     if (!object3D) return
     const mat = makeMaterial()
-    if (object3D.isMesh) {
-      object3D.material = mat
-    } else {
-      object3D.traverse((child) => {
-        if (child.isMesh) child.material = mat
-      })
-    }
+    if (object3D.isMesh) object3D.material = mat
+    else object3D.traverse((child) => { if (child.isMesh) child.material = mat })
   }, [color, opacity, object3D])
 
   if (!object3D) return loading ? <InlineLoader text={`Načítám ${name || url}`} /> : null
@@ -163,7 +156,7 @@ function TouchTrackballControls({ target = [0, 0, 0] }) {
     }
   }, [camera, gl])
 
-  // ✅ target nastav jen při změně vstupu; pak ho necháme žít (pravé tlačítko – pan – funguje).
+  // target nastavíme jen při změně vstupu – panning pravým tlačítkem pak funguje
   useEffect(() => {
     if (!controlsRef.current) return
     controlsRef.current.target.set(target[0], target[1], target[2])
@@ -322,7 +315,7 @@ export default function ClientPage() {
     setIsMobile(uaMobile || coarse || narrow)
   }, [])
 
-  // data modelů + logo
+  // data modelů + logo + title
   const [files, setFiles] = useState([])
   const [colors, setColors] = useState([])
   const [opacities, setOpacities] = useState([])
@@ -330,6 +323,13 @@ export default function ClientPage() {
   const [fatal, setFatal] = useState(null)
 
   const [logoCfg, setLogoCfg] = useState({ url: DEFAULT_LOGO, opacity: 0.9, width: 160, pos: "bc" })
+  const [titleCfg, setTitleCfg] = useState({
+    text: "",
+    opacity: 0.9,
+    color: "#ffffff",
+    size: 18,  // px
+    pos: "tr", // top-right default
+  })
 
   // Trackball target
   const [cameraTarget, setCameraTarget] = useState([0, 0, 0])
@@ -342,7 +342,7 @@ export default function ClientPage() {
   const centerParam = (getParam("center") || "combined").toLowerCase()
   const centerMode = ["per", "combined", "none"].includes(centerParam) ? centerParam : "combined"
 
-  // init – manifest > files
+  // init – manifest > files + logo + title
   useEffect(() => {
     ;(async () => {
       try {
@@ -360,12 +360,27 @@ export default function ClientPage() {
           setColors(Fs.map((_, i) => palette[i % palette.length]))
           setOpacities(Fs.map(() => 1))
           setVisibles(Fs.map(() => true))
+
           const logoUrl = m?.logo?.url || DEFAULT_LOGO
           setLogoCfg({
             url: logoUrl || null,
             opacity: clamp01(parseFloat(getParam("logoOpacity") ?? "0.9")),
             width: parseInt(getParam("logoWidth") ?? (window.innerWidth < 768 ? "120" : "160"), 10),
             pos: getParam("logoPos") || "bc",
+          })
+
+          // Title (priorita: manifest.title → ?title param)
+          const titleText = (m?.title ?? getParam("title") ?? "").toString()
+          const tOpacity = clamp01(parseFloat(getParam("titleOpacity") ?? "0.9"))
+          const tColor = getParam("titleColor") || "#ffffff"
+          const tSize = parseInt(getParam("titleSize") ?? "18", 10)
+          const tPos = (getParam("titlePos") || "tr").toLowerCase()
+          setTitleCfg({
+            text: titleText,
+            opacity: isNaN(tOpacity) ? 0.9 : tOpacity,
+            color: tColor,
+            size: isNaN(tSize) ? 18 : tSize,
+            pos: ["tr", "tl", "br", "bl", "tc", "bc"].includes(tPos) ? tPos : "tr",
           })
           return
         }
@@ -381,11 +396,25 @@ export default function ClientPage() {
           setColors(Fs.map((_, i) => palette[i % palette.length]))
           setOpacities(Fs.map(() => 1))
           setVisibles(Fs.map(() => true))
+
           setLogoCfg({
             url: getParam("logo") === "none" ? null : getParam("logo") || DEFAULT_LOGO,
             opacity: clamp01(parseFloat(getParam("logoOpacity") ?? "0.9")),
             width: parseInt(getParam("logoWidth") ?? (window.innerWidth < 768 ? "120" : "160"), 10),
             pos: getParam("logoPos") || "bc",
+          })
+
+          const titleText = (getParam("title") ?? "").toString()
+          const tOpacity = clamp01(parseFloat(getParam("titleOpacity") ?? "0.9"))
+          const tColor = getParam("titleColor") || "#ffffff"
+          const tSize = parseInt(getParam("titleSize") ?? "18", 10)
+          const tPos = (getParam("titlePos") || "tr").toLowerCase()
+          setTitleCfg({
+            text: titleText,
+            opacity: isNaN(tOpacity) ? 0.9 : tOpacity,
+            color: tColor,
+            size: isNaN(tSize) ? 18 : tSize,
+            pos: ["tr", "tl", "br", "bl", "tc", "bc"].includes(tPos) ? tPos : "tr",
           })
           return
         }
@@ -407,7 +436,7 @@ export default function ClientPage() {
     })()
   }, [])
 
-  // LOGO pod scénou
+  // LOGO pod scénou (pod Canvas)
   const logoEl = logoCfg.url && (
     <img
       src={logoCfg.url}
@@ -428,6 +457,43 @@ export default function ClientPage() {
     />
   )
 
+  // TITLE pod scénou (pod Canvas), default top-right
+  const titleStylePos = (() => {
+    const base = { position: "absolute", zIndex: 0, pointerEvents: "none", userSelect: "none" }
+    switch (titleCfg.pos) {
+      case "tl": return { ...base, top: 12, left: 12 }
+      case "tr": return { ...base, top: 12, right: 12 }
+      case "bl": return { ...base, bottom: 12, left: 12 }
+      case "br": return { ...base, bottom: 12, right: 12 }
+      case "tc": return { ...base, top: 12, left: "50%", transform: "translateX(-50%)" }
+      case "bc": return { ...base, bottom: 12, left: "50%", transform: "translateX(-50%)" }
+      default: return { ...base, top: 12, right: 12 }
+    }
+  })()
+  const titleEl =
+    titleCfg.text && titleCfg.text.trim().length > 0 ? (
+      <div
+        style={{
+          ...titleStylePos,
+          color: titleCfg.color,
+          opacity: titleCfg.opacity,
+          fontSize: titleCfg.size,
+          fontFamily: "Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif",
+          fontWeight: 700,
+          letterSpacing: 0.3,
+          textShadow: "0 1px 2px rgba(0,0,0,.55)",
+          filter: "drop-shadow(0 0 1px rgba(0,0,0,.35))",
+          whiteSpace: "nowrap",
+          maxWidth: "60vw",
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+        }}
+        title={titleCfg.text}
+      >
+        {titleCfg.text}
+      </div>
+    ) : null
+
   // ref na root group v Canvasu
   const rootRef = useRef()
 
@@ -435,8 +501,9 @@ export default function ClientPage() {
     <div className="stage" style={{ position: "relative", width: "100vw", height: "100vh", background: "black" }}>
       <PreloadIcons />
 
-      {/* LOGO pod scénou */}
+      {/* Overlays POD scénou */}
       {logoEl}
+      {titleEl}
 
       {/* Ovládací panel */}
       <div
