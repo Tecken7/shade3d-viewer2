@@ -142,7 +142,6 @@ function AnyModel({ name, url, color, opacity, visible, onLoaded }) {
 function TouchTrackballControls({ target = [0, 0, 0] }) {
   const { camera, gl } = useThree()
   const controlsRef = useRef(null)
-  const targetVec = useMemo(() => new THREE.Vector3(...target), [target])
 
   useEffect(() => {
     const controls = new TrackballControls(camera, gl.domElement)
@@ -164,9 +163,15 @@ function TouchTrackballControls({ target = [0, 0, 0] }) {
     }
   }, [camera, gl])
 
+  // ✅ target nastav jen při změně vstupu; pak ho necháme žít (pravé tlačítko – pan – funguje).
+  useEffect(() => {
+    if (!controlsRef.current) return
+    controlsRef.current.target.set(target[0], target[1], target[2])
+    controlsRef.current.update()
+  }, [target])
+
   useFrame(() => {
     if (!controlsRef.current) return
-    controlsRef.current.target.copy(targetVec)
     if (camera.isOrthographicCamera) {
       controlsRef.current.panSpeed = camera.zoom * 0.4
     }
