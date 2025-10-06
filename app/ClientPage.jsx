@@ -455,8 +455,8 @@ export default function ClientPage() {
           background: "rgba(0,0,0,.25)",
           border: "1px solid rgba(255,255,255,.15)",
           borderRadius: 8,
-          padding: "8px 10px",                  // kompaktnější
-          width: "clamp(240px, 30vw, 420px)",   // užší panel
+          padding: "8px 10px",
+          width: "clamp(240px, 30vw, 420px)",
           maxWidth: "calc(100vw - 20px)",
           boxSizing: "border-box",
         }}
@@ -470,9 +470,9 @@ export default function ClientPage() {
               key={i}
               style={{
                 display: "grid",
-                gridTemplateColumns: "minmax(110px, 20ch) 1fr 26px", // label | control | eye
+                gridTemplateColumns: "max-content 36px 1fr 26px", // label | swatch | slider | eye
                 alignItems: "center",
-                columnGap: 6,
+                columnGap: 4,             // skoro žádná mezera mezi názvem a swatchem
                 rowGap: 6,
                 margin: "6px 0",
               }}
@@ -490,8 +490,17 @@ export default function ClientPage() {
                 {stripExt(f.name)}:
               </div>
 
-              {/* Control area: slider (100%) + swatch vlevo přes začátek dráhy */}
-              <div className="row-control" style={{ position: "relative", minWidth: 0 }}>
+              {/* Swatch */}
+              <div className="row-swatch">
+                <ColorSwatch
+                  color={colors[i] ?? "#ffffff"}
+                  onChange={(c) => setColors((prev) => prev.map((v, idx) => (idx === i ? c : v)))}
+                  ariaLabel={`${f.name} color`}
+                />
+              </div>
+
+              {/* Slider – zabere zbytek místa, ale s minimální délkou pro použitelnost */}
+              <div className="row-slider" style={{ minWidth: 0 }}>
                 <input
                   className="slider"
                   type="range"
@@ -505,25 +514,17 @@ export default function ClientPage() {
                   }}
                   style={{ width: "100%", minWidth: 140 }}
                 />
-                <div style={{ position: "absolute", left: 0, top: "50%", transform: "translateY(-50%)" }}>
-                  <ColorSwatch
-                    color={colors[i] ?? "#ffffff"}
-                    onChange={(c) => setColors((prev) => prev.map((v, idx) => (idx === i ? c : v)))}
-                    ariaLabel={`${f.name} color`}
-                  />
-                </div>
-                <div aria-hidden style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: 44, pointerEvents: "none" }} />
               </div>
 
-              {/* Eye button */}
+              {/* Eye button – v samostatném sloupci, už se nepřekrývá se sliderem */}
               <button
                 className={`toggle icon-btn ${visibles[i] ? "is-on" : "is-off"}`}
                 onClick={() => setVisibles((prev) => prev.map((v, idx) => (idx === i ? !v : v)))}
                 aria-label={visibles[i] ? `Hide ${f.name}` : `Show ${f.name}`}
                 style={{
                   position: "relative",
-                  width: 26,      // menší
-                  height: 22,     // menší
+                  width: 26,
+                  height: 22,
                   padding: 0,
                   display: "inline-flex",
                   alignItems: "center",
@@ -689,15 +690,16 @@ export default function ClientPage() {
             max-width: calc(100vw - 16px) !important;
           }
           .control-row {
-            grid-template-columns: 1fr 26px !important; /* control | eye */
+            grid-template-columns: 36px 1fr 26px !important; /* swatch | slider | eye */
           }
           .control-row .row-label {
             grid-column: 1 / -1;  /* label přes celý řádek */
             white-space: normal !important;
             word-break: break-word;
             opacity: .95;
+            margin-bottom: 2px;
           }
-          .row-control .slider { width: 100% !important; min-width: 140px !important; }
+          .row-slider .slider { width: 100% !important; min-width: 140px !important; }
         }
       `}</style>
     </div>
