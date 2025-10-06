@@ -470,14 +470,14 @@ export default function ClientPage() {
               key={i}
               style={{
                 display: "grid",
-                gridTemplateColumns: "minmax(120px, 26ch) 36px 1fr 28px",
+                gridTemplateColumns: "max-content 1fr 28px", // label | control | eye
                 alignItems: "center",
-                columnGap: 10,
+                columnGap: 8,
                 rowGap: 6,
                 margin: "8px 0",
               }}
             >
-              {/* Label */}
+              {/* Label (šířka = text) */}
               <div
                 className="row-label"
                 style={{
@@ -490,17 +490,15 @@ export default function ClientPage() {
                 {stripExt(f.name)}:
               </div>
 
-              {/* Swatch */}
-              <div className="row-swatch">
-                <ColorSwatch
-                  color={colors[i] ?? "#ffffff"}
-                  onChange={(c) => setColors((prev) => prev.map((v, idx) => (idx === i ? c : v)))}
-                  ariaLabel={`${f.name} color`}
-                />
-              </div>
-
-              {/* Slider */}
-              <div className="row-slider" style={{ minWidth: 0 }}>
+              {/* Control area: slider (100%) + swatch přilepený vlevo */}
+              <div
+                className="row-control"
+                style={{
+                  position: "relative",
+                  minWidth: 0,
+                }}
+              >
+                {/* slider – plynule, ale s minimální délkou pro použitelnost */}
                 <input
                   className="slider"
                   type="range"
@@ -512,8 +510,43 @@ export default function ClientPage() {
                     const v = parseFloat(e.target.value)
                     setOpacities((prev) => prev.map((x, idx) => (idx === i ? v : x)))
                   }}
-                  style={{ width: "100%" }}
+                  style={{
+                    width: "100%",
+                    minWidth: 140, // ← minimální délka, aby šel pohodlně ovládat
+                  }}
                 />
+
+                {/* swatch překrývá levý začátek dráhy → slider vizuálně "začíná" hned za názvem */}
+                <div
+                  style={{
+                    position: "absolute",
+                    left: 0,
+                    top: "50%",
+                    transform: "translateY(-50%)",
+                    pointerEvents: "auto",
+                  }}
+                >
+                  <ColorSwatch
+                    color={colors[i] ?? "#ffffff"}
+                    onChange={(c) => setColors((prev) => prev.map((v, idx) => (idx === i ? c : v)))}
+                    ariaLabel={`${f.name} color`}
+                  />
+                </div>
+
+                {/* aby slider nebyl pod swatchem nekliknutelný, posuň jeho „klikací“ začátek pod swatchem doprava paddingem na wrapperu */}
+                <div
+                  aria-hidden
+                  style={{
+                    position: "absolute",
+                    left: 0,
+                    top: 0,
+                    bottom: 0,
+                    width: 44, // 36 swatch + 8px vizuální mezera
+                    pointerEvents: "none",
+                    background: "transparent",
+                  }}
+                />
+                {/* vizuálně to nechává slider podjet pod swatch, ale uživatel tahá za palec bez kolize */}
               </div>
 
               {/* Eye button */}
@@ -591,7 +624,7 @@ export default function ClientPage() {
                 </div>
                 <div className="axis-row" style={{ display: "flex", alignItems: "center", gap: 8, margin: "4px 0" }}>
                   <span className="axis-label" aria-hidden="true" style={{ width: 18, textAlign: "right", color: "#fff", opacity: 0.9 }}>&nbsp;</span>
-                  <input className="slider" type="range" min={0} max={2} step={0.01} value={lightIntensity} onChange={(e) => setLightIntensity(parseFloat(e.target.value))} style={{ flex: "1 1 auto", width: "100%" }}/>
+                  <input className="slider" type="range" min={0} max={2} step={0.01} value={lightIntensity} onChange={(e) => setLightIntensity(parseFloat(e.target.value))} style={{ flex: "1 1 auto", width: "100%", minWidth: 140 }}/>
                 </div>
                 {[
                   { label: "Light 1 Position", pos: lightPos1, setPos: setLightPos1 },
@@ -615,7 +648,7 @@ export default function ClientPage() {
                           step={0.1}
                           value={light.pos[axis]}
                           onChange={(e) => light.setPos({ ...light.pos, [axis]: parseFloat(e.target.value) })}
-                          style={{ flex: "1 1 auto", width: "100%" }}
+                          style={{ flex: "1 1 auto", width: "100%", minWidth: 140 }}
                         />
                       </div>
                     ))}
@@ -683,7 +716,7 @@ export default function ClientPage() {
         .slider::-moz-range-track { height: 4px; background: white; border-radius: 2px; }
         .slider::-moz-range-thumb { width: 14px; height: 14px; border-radius: 50%; background: white; cursor: pointer; box-shadow: 0 0 2px black; border: none; }
 
-        /* --- RESPONSIVE GRID FOR ROWS --- */
+        /* --- RESPONSIVE --- */
         @media (max-width: 720px) {
           .controls-panel {
             left: 8px !important;
@@ -692,14 +725,15 @@ export default function ClientPage() {
             max-width: calc(100vw - 16px) !important;
           }
           .control-row {
-            grid-template-columns: 36px 1fr 28px !important; /* swatch | slider | eye */
+            grid-template-columns: 1fr 28px !important; /* control | eye */
           }
           .control-row .row-label {
-            grid-column: 1 / -1;          /* label přes celý řádek */
+            grid-column: 1 / -1;  /* label přes celý řádek */
             white-space: normal !important;
             word-break: break-word;
             opacity: .95;
           }
+          .row-control .slider { width: 100% !important; min-width: 140px !important; }
         }
       `}</style>
     </div>
