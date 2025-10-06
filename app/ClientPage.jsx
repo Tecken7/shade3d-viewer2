@@ -163,7 +163,6 @@ function TouchTrackballControls({ target = [0, 0, 0] }) {
     }
   }, [camera, gl])
 
-  // ✅ target nastav jen při změně vstupu; pak ho necháme žít (pravé tlačítko – pan – funguje).
   useEffect(() => {
     if (!controlsRef.current) return
     controlsRef.current.target.set(target[0], target[1], target[2])
@@ -190,7 +189,7 @@ function AutoCenterAndFrame({
   isMobile = false,
   desktopScale = 0.4,
   mobileScale = 1.0,
-  centerMode = "combined", // "combined" | "per" | "none"
+  centerMode = "combined",
 }) {
   const { camera, size } = useThree()
 
@@ -259,7 +258,7 @@ function ColorSwatch({ color, onChange, ariaLabel }) {
     return () => document.removeEventListener("mousedown", onDocClick)
   }, [open])
   return (
-    <div ref={containerRef} style={{ position: "relative", display: "inline-block" }}>
+    <div ref={containerRef} className="swatch-wrap" style={{ position: "relative", display: "inline-block" }}>
       <button
         aria-label={ariaLabel || "color picker"}
         onClick={() => setOpen((v) => !v)}
@@ -271,6 +270,7 @@ function ColorSwatch({ color, onChange, ariaLabel }) {
       />
       {open && (
         <div
+          className="swatch-pop"
           style={{
             position: "absolute", zIndex: 20, top: 28, left: 0,
             background: "rgba(0,0,0,.92)", padding: 12, borderRadius: 10,
@@ -449,7 +449,7 @@ export default function ClientPage() {
           color: "white",
           fontFamily: "sans-serif",
           fontSize: "14px",
-          ["--slider-width"]: "180px",
+          ["--slider-width"]: "220px",
           opacity: uiReady ? 1 : 0,
           transition: "opacity .12s ease",
           backdropFilter: "blur(3px)",
@@ -457,75 +457,86 @@ export default function ClientPage() {
           border: "1px solid rgba(255,255,255,.15)",
           borderRadius: 8,
           padding: "10px 12px",
-          maxWidth: "46vw",
+          width: "clamp(260px, 38vw, 560px)",
+          maxWidth: "calc(100vw - 20px)",
         }}
       >
         {fatal ? (
           <div style={{ color: "#ff8b8b" }}>{fatal}</div>
         ) : (
           files.map((f, i) => (
-            <div className="control-row" key={i} style={{ display: "flex", alignItems: "center", gap: 8, margin: "6px 0" }}>
+            <div className="control-row" key={i} style={{ display: "flex", alignItems: "center", gap: 8, margin: "8px 0" }}>
+              {/* Label – na mobilu má vlastní řádek */}
               <div
                 className="row-label"
-                style={{ width: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+                style={{
+                  width: 200,
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                }}
                 title={f.rawName || f.name}
               >
                 {stripExt(f.name)}:
               </div>
-              <ColorSwatch
-                color={colors[i] ?? "#ffffff"}
-                onChange={(c) => setColors((prev) => prev.map((v, idx) => (idx === i ? c : v)))}
-                ariaLabel={`${f.name} color`}
-              />
-              <input
-                className="slider"
-                type="range"
-                min={0}
-                max={1}
-                step={0.01}
-                value={opacities[i] ?? 1}
-                onChange={(e) => {
-                  const v = parseFloat(e.target.value)
-                  setOpacities((prev) => prev.map((x, idx) => (idx === i ? v : x)))
-                }}
-                style={{ width: "var(--slider-width, 180px)" }}
-              />
-              <button
-                className={`toggle icon-btn ${visibles[i] ? "is-on" : "is-off"}`}
-                onClick={() => setVisibles((prev) => prev.map((v, idx) => (idx === i ? !v : v)))}
-                aria-label={visibles[i] ? `Hide ${f.name}` : `Show ${f.name}`}
-                style={{
-                  position: "relative",
-                  width: 28,
-                  height: 24,
-                  padding: 0,
-                  display: "inline-flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  overflow: "hidden",
-                  marginLeft: 4,
-                  background: "transparent",
-                  border: "1px solid white",
-                  borderRadius: 6,
-                  color: "white",
-                  cursor: "pointer",
-                }}
-              >
-                <img
-                  src={ICONS.eye}
-                  alt=""
-                  width="20"
-                  height="20"
-                  style={{ position: "absolute", inset: 0, width: 20, height: 20, margin: "auto", opacity: visibles[i] ? 1 : 0, transition: "opacity .06s linear" }}
+
+              {/* Ovládací prvky */}
+              <div className="row-controls" style={{ display: "flex", alignItems: "center", gap: 8, flex: 1, minWidth: 0 }}>
+                <ColorSwatch
+                  color={colors[i] ?? "#ffffff"}
+                  onChange={(c) => setColors((prev) => prev.map((v, idx) => (idx === i ? c : v)))}
+                  ariaLabel={`${f.name} color`}
                 />
-                <img
-                  src={ICONS.eyeOff}
-                  alt=""
-                  width="20"
-                  height="20"
-                  style={{ position: "absolute", inset: 0, width: 20, height: 20, margin: "auto", opacity: visibles[i] ? 0 : 1, transition: "opacity .06s linear" }}
+                <input
+                  className="slider"
+                  type="range"
+                  min={0}
+                  max={1}
+                  step={0.01}
+                  value={opacities[i] ?? 1}
+                  onChange={(e) => {
+                    const v = parseFloat(e.target.value)
+                    setOpacities((prev) => prev.map((x, idx) => (idx === i ? v : x)))
+                  }}
+                  style={{ width: "var(--slider-width, 220px)", flex: "1 1 auto" }}
                 />
-              </button>
+                <button
+                  className={`toggle icon-btn ${visibles[i] ? "is-on" : "is-off"}`}
+                  onClick={() => setVisibles((prev) => prev.map((v, idx) => (idx === i ? !v : v)))}
+                  aria-label={visibles[i] ? `Hide ${f.name}` : `Show ${f.name}`}
+                  style={{
+                    position: "relative",
+                    width: 28,
+                    height: 24,
+                    padding: 0,
+                    display: "inline-flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    overflow: "hidden",
+                    background: "transparent",
+                    border: "1px solid white",
+                    borderRadius: 6,
+                    color: "white",
+                    cursor: "pointer",
+                    flex: "0 0 auto",
+                  }}
+                >
+                  <img
+                    src={ICONS.eye}
+                    alt=""
+                    width="20"
+                    height="20"
+                    style={{ position: "absolute", inset: 0, width: 20, height: 20, margin: "auto", opacity: visibles[i] ? 1 : 0, transition: "opacity .06s linear" }}
+                  />
+                  <img
+                    src={ICONS.eyeOff}
+                    alt=""
+                    width="20"
+                    height="20"
+                    style={{ position: "absolute", inset: 0, width: 20, height: 20, margin: "auto", opacity: visibles[i] ? 0 : 1, transition: "opacity .06s linear" }}
+                  />
+                </button>
+              </div>
             </div>
           ))
         )}
@@ -558,14 +569,14 @@ export default function ClientPage() {
             </button>
 
             {showLights && (
-              <div style={{ marginTop: 8 }}>
+              <div className="lights-wrap" style={{ marginTop: 8 }}>
                 <div className="lights-row" style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
                   <img src={ICONS.bulb} alt="" width="16" height="16" style={{ width: 16, height: 16 }} />
                   <span>Light Intensity</span>
                 </div>
                 <div className="axis-row" style={{ display: "flex", alignItems: "center", gap: 8, margin: "4px 0" }}>
                   <span className="axis-label" aria-hidden="true" style={{ width: 18, textAlign: "right", color: "#fff", opacity: 0.9 }}>&nbsp;</span>
-                  <input className="slider" type="range" min={0} max={2} step={0.01} value={lightIntensity} onChange={(e) => setLightIntensity(parseFloat(e.target.value))} />
+                  <input className="slider" type="range" min={0} max={2} step={0.01} value={lightIntensity} onChange={(e) => setLightIntensity(parseFloat(e.target.value))} style={{ flex: "1 1 auto" }}/>
                 </div>
                 {[
                   { label: "Light 1 Position", pos: lightPos1, setPos: setLightPos1 },
@@ -573,7 +584,7 @@ export default function ClientPage() {
                   { label: "Light 3 Position", pos: lightPos3, setPos: setLightPos3 },
                   { label: "Light 4 Position", pos: lightPos4, setPos: setLightPos4 },
                 ].map((light, idx) => (
-                  <div key={idx} style={{ marginTop: 10 }}>
+                  <div key={idx} className="light-block" style={{ marginTop: 10 }}>
                     <div className="lights-row" style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
                       <img src={ICONS.flashlight} alt="" width="16" height="16" style={{ width: 16, height: 16 }} />
                       <span>{light.label}</span>
@@ -589,7 +600,7 @@ export default function ClientPage() {
                           step={0.1}
                           value={light.pos[axis]}
                           onChange={(e) => light.setPos({ ...light.pos, [axis]: parseFloat(e.target.value) })}
-                          style={{ flex: "0 0 var(--slider-width, 140px)", width: "var(--slider-width, 140px)" }}
+                          style={{ flex: "1 1 auto", width: "var(--slider-width, 220px)" }}
                         />
                       </div>
                     ))}
@@ -649,13 +660,57 @@ export default function ClientPage() {
         )}
       </Canvas>
 
-      {/* Globální styly sliderů */}
+      {/* Globální styly sliderů + responzivní layout panelu */}
       <style jsx global>{`
-        .slider { appearance: none; width: var(--slider-width, 180px); height: 14px; background: transparent; margin: 5px 0; display: inline-block; }
+        .slider { appearance: none; width: var(--slider-width, 220px); height: 14px; background: transparent; margin: 5px 0; display: inline-block; }
         .slider::-webkit-slider-runnable-track { height: 4px; background: white; border-radius: 2px; }
         .slider::-webkit-slider-thumb { appearance: none; width: 14px; height: 14px; border-radius: 50%; background: white; cursor: pointer; box-shadow: 0 0 2px black; margin-top: -5px; }
         .slider::-moz-range-track { height: 4px; background: white; border-radius: 2px; }
         .slider::-moz-range-thumb { width: 14px; height: 14px; border-radius: 50%; background: white; cursor: pointer; box-shadow: 0 0 2px black; border: none; }
+
+        /* --- RESPONSIVE --- */
+        @media (max-width: 560px) {
+          .controls-panel {
+            left: 8px !important;
+            right: 8px;
+            width: auto !important;
+            max-width: calc(100vw - 16px) !important;
+            --slider-width: 100%;
+          }
+          .control-row {
+            flex-direction: column;            /* label NAHORU */
+            align-items: stretch !important;
+            gap: 6px !important;
+          }
+          .control-row .row-label {
+            width: 100% !important;
+            white-space: normal !important;    /* delší názvy se zalomí */
+            word-break: break-word;
+            opacity: .95;
+          }
+          .control-row .row-controls {
+            width: 100%;
+          }
+          .control-row .slider {
+            width: 100% !important;            /* slider se roztáhne */
+            flex: 1 1 auto;
+          }
+          .control-row .icon-btn {
+            align-self: flex-end;              /* oko vpravo */
+          }
+
+          /* Světla – svislé řádky, slider 100% */
+          .lights-wrap .axis-row {
+            gap: 8px !important;
+          }
+          .lights-wrap .axis-row .axis-label {
+            width: 22px !important;
+          }
+          .lights-wrap .axis-row .slider {
+            width: 100% !important;
+            flex: 1 1 auto;
+          }
+        }
       `}</style>
     </div>
   )
