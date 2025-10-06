@@ -119,7 +119,6 @@ function AnyModel({ name, url, color, opacity, visible, onLoaded }) {
       }
     })()
     return () => { cancelled = true }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [url, ext])
 
   useEffect(() => {
@@ -138,7 +137,7 @@ function AnyModel({ name, url, color, opacity, visible, onLoaded }) {
   return visible ? <primitive object={object3D} /> : null
 }
 
-/* ---------- Trackball & target (UVNITŘ Canvas) ---------- */
+/* ---------- Trackball & target ---------- */
 function TouchTrackballControls({ target = [0, 0, 0] }) {
   const { camera, gl } = useThree()
   const controlsRef = useRef(null)
@@ -180,7 +179,7 @@ function TouchTrackballControls({ target = [0, 0, 0] }) {
   return null
 }
 
-/* ---------- AutoCenter & AutoFrame (UVNITŘ Canvas) ---------- */
+/* ---------- AutoCenter & AutoFrame ---------- */
 function AutoCenterAndFrame({
   rootRef,
   depsKey,
@@ -242,7 +241,6 @@ function AutoCenterAndFrame({
     camera.zoom = Math.max(newZoom, 0.01)
     camera.position.set(ctr.x, ctr.y, ctr.z + Math.abs(camera.position.z))
     camera.updateProjectionMatrix()
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [depsKey, size.width, size.height, isMobile, desktopScale, mobileScale, margin, centerMode])
 
   return null
@@ -322,7 +320,8 @@ export default function ClientPage() {
     setIsMobile(uaMobile || coarse || narrow)
   }, [])
 
-  // data modelů + logo
+  // data & UI
+  const [title, setTitle] = useState<string | null>(null)  // ← titulek vedle „Světla“
   const [files, setFiles] = useState([])       // {url,name,rawName,c?}
   const [colors, setColors] = useState([])     // hex barvy pro každý model
   const [opacities, setOpacities] = useState([])
@@ -334,7 +333,7 @@ export default function ClientPage() {
   // Trackball target
   const [cameraTarget, setCameraTarget] = useState([0, 0, 0])
 
-  // načtené objekty count (trigger centra/fitu)
+  // načtené objekty count
   const [loadedCount, setLoadedCount] = useState(0)
   const handleModelLoaded = () => setLoadedCount((n) => n + 1)
 
@@ -342,7 +341,7 @@ export default function ClientPage() {
   const centerParam = (getParam("center") || "combined").toLowerCase()
   const centerMode = ["per", "combined", "none"].includes(centerParam) ? centerParam : "combined"
 
-  // init – manifest > files
+  // init – manifest / files / title
   useEffect(() => {
     ;(async () => {
       try {
@@ -353,7 +352,7 @@ export default function ClientPage() {
             url: x.u,
             name: stripExt(x.n) || `Model ${i + 1}`,
             rawName: x.n,
-            c: x.c, // ← barva z manifestu (volitelně)
+            c: x.c,
           }))
           if (!Fs.length) throw new Error("Manifest je prázdný.")
           setFiles(Fs)
@@ -361,6 +360,8 @@ export default function ClientPage() {
           setColors(Fs.map((f, i) => f.c || palette[i % palette.length]))
           setOpacities(Fs.map(() => 1))
           setVisibles(Fs.map(() => true))
+          setTitle(m?.title ?? getParam("title") ?? null) // ← title z manifestu (fallback: query)
+
           const logoUrl = m?.logo?.url || DEFAULT_LOGO
           setLogoCfg({
             url: logoUrl || null,
@@ -378,13 +379,15 @@ export default function ClientPage() {
             url: x.u,
             name: stripExt(x.n) || `Model ${i + 1}`,
             rawName: x.n,
-            c: x.c, // ← barva z query payloadu
+            c: x.c,
           }))
           setFiles(Fs)
           const palette = ["#f5f5dc", "#8e8e8e", "#ffffff", "#ffd7a8", "#c0c0c0", "#e6f0ff", "#ffeedd"]
           setColors(Fs.map((f, i) => f.c || palette[i % palette.length]))
           setOpacities(Fs.map(() => 1))
           setVisibles(Fs.map(() => true))
+          setTitle(getParam("title") ?? null) // ← title z query
+
           setLogoCfg({
             url: getParam("logo") === "none" ? null : getParam("logo") || DEFAULT_LOGO,
             opacity: clamp01(parseFloat(getParam("logoOpacity") ?? "0.9")),
@@ -468,126 +471,130 @@ export default function ClientPage() {
         {fatal ? (
           <div style={{ color: "#ff8b8b" }}>{fatal}</div>
         ) : (
-          files.map((f, i) => (
-            <div
-              className="control-row"
-              key={i}
-              style={{
-                display: "grid",
-                gridTemplateColumns: "36px 1fr 26px", // swatch | slider | eye
-                gridAutoRows: "auto",
-                alignItems: "center",
-                columnGap: 6,
-                rowGap: 6,
-                margin: "6px 0",
-              }}
-            >
-              {/* Label přes celý řádek (vždy nahoře) */}
+          <>
+            {/* Souborové řádky */}
+            {files.map((f, i) => (
               <div
-                className="row-label"
+                className="control-row"
+                key={i}
                 style={{
-                  gridColumn: "1 / -1",
-                  overflow: "hidden",
-                  textOverflow: "ellipsis",
-                  whiteSpace: "nowrap",
+                  display: "grid",
+                  gridTemplateColumns: "36px 1fr 26px", // swatch | slider | eye
+                  gridAutoRows: "auto",
+                  alignItems: "center",
+                  columnGap: 6,
+                  rowGap: 6,
+                  margin: "6px 0",
                 }}
-                title={f.rawName || f.name}
               >
-                {stripExt(f.name)}:
-              </div>
-
-              {/* Swatch */}
-              <div className="row-swatch">
-                <ColorSwatch
-                  color={colors[i] ?? "#ffffff"}
-                  onChange={(c) => setColors((prev) => prev.map((v, idx) => (idx === i ? c : v)))}
-                  ariaLabel={`${f.name} color`}
-                />
-              </div>
-
-              {/* Slider – stejně dlouhý pro všechny; vpravo kratší o 18 px kvůli oku */}
-              <div className="row-slider" style={{ minWidth: 0 }}>
-                <input
-                  className="slider"
-                  type="range"
-                  min={0}
-                  max={1}
-                  step={0.01}
-                  value={opacities[i] ?? 1}
-                  onChange={(e) => {
-                    const v = parseFloat(e.target.value)
-                    setOpacities((prev) => prev.map((x, idx) => (idx === i ? v : x)))
+                <div
+                  className="row-label"
+                  style={{
+                    gridColumn: "1 / -1",
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap",
                   }}
-                  style={{ width: "calc(100% - 18px)", minWidth: 140 }}
-                />
-              </div>
+                  title={f.rawName || f.name}
+                >
+                  {stripExt(f.name)}:
+                </div>
 
-              {/* Eye */}
+                <div className="row-swatch">
+                  <ColorSwatch
+                    color={colors[i] ?? "#ffffff"}
+                    onChange={(c) => setColors((prev) => prev.map((v, idx) => (idx === i ? c : v)))}
+                    ariaLabel={`${f.name} color`}
+                  />
+                </div>
+
+                <div className="row-slider" style={{ minWidth: 0 }}>
+                  <input
+                    className="slider"
+                    type="range"
+                    min={0}
+                    max={1}
+                    step={0.01}
+                    value={opacities[i] ?? 1}
+                    onChange={(e) => {
+                      const v = parseFloat(e.target.value)
+                      setOpacities((prev) => prev.map((x, idx) => (idx === i ? v : x)))
+                    }}
+                    style={{ width: "calc(100% - 18px)", minWidth: 140 }}
+                  />
+                </div>
+
+                <button
+                  className={`toggle icon-btn ${visibles[i] ? "is-on" : "is-off"}`}
+                  onClick={() => setVisibles((prev) => prev.map((v, idx) => (idx === i ? !v : v)))}
+                  aria-label={visibles[i] ? `Hide ${f.name}` : `Show ${f.name}`}
+                  style={{
+                    position: "relative",
+                    width: 26,
+                    height: 22,
+                    padding: 0,
+                    display: "inline-flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    overflow: "hidden",
+                    background: "transparent",
+                    border: "1px solid white",
+                    borderRadius: 6,
+                    color: "white",
+                    cursor: "pointer",
+                  }}
+                >
+                  <img src={ICONS.eye} alt="" width="18" height="18" style={{ position: "absolute", inset: 0, width: 18, height: 18, margin: "auto", opacity: visibles[i] ? 1 : 0, transition: "opacity .06s linear" }} />
+                  <img src={ICONS.eyeOff} alt="" width="18" height="18" style={{ position: "absolute", inset: 0, width: 18, height: 18, margin: "auto", opacity: visibles[i] ? 0 : 1, transition: "opacity .06s linear" }} />
+                </button>
+              </div>
+            ))}
+
+            {/* Řádek: Světla + Titulek */}
+            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
               <button
-                className={`toggle icon-btn ${visibles[i] ? "is-on" : "is-off"}`}
-                onClick={() => setVisibles((prev) => prev.map((v, idx) => (idx === i ? !v : v)))}
-                aria-label={visibles[i] ? `Hide ${f.name}` : `Show ${f.name}`}
+                className={`toggle arrow-toggle ${showLights ? "is-open" : "is-closed"}`}
+                onClick={() => setShowLights(!showLights)}
+                aria-label="Toggle lights panel"
                 style={{
-                  position: "relative",
-                  width: 26,
-                  height: 22,
-                  padding: 0,
                   display: "inline-flex",
                   alignItems: "center",
-                  justifyContent: "center",
-                  overflow: "hidden",
-                  background: "transparent",
+                  gap: 8,
+                  padding: "6px 10px",
                   border: "1px solid white",
                   borderRadius: 6,
+                  background: "transparent",
                   color: "white",
                   cursor: "pointer",
                 }}
               >
-                <img
-                  src={ICONS.eye}
-                  alt=""
-                  width="18"
-                  height="18"
-                  style={{ position: "absolute", inset: 0, width: 18, height: 18, margin: "auto", opacity: visibles[i] ? 1 : 0, transition: "opacity .06s linear" }}
-                />
-                <img
-                  src={ICONS.eyeOff}
-                  alt=""
-                  width="18"
-                  height="18"
-                  style={{ position: "absolute", inset: 0, width: 18, height: 18, margin: "auto", opacity: visibles[i] ? 0 : 1, transition: "opacity .06s linear" }}
-                />
+                <span className="arrow-stack" aria-hidden style={{ position: "relative", width: 16, height: 16, display: "inline-block" }}>
+                  <img src={ICONS.arrowClosed} width="16" height="16" style={{ position: "absolute", left: 0, top: 0, opacity: showLights ? 0 : 1 }} alt="" />
+                  <img src={ICONS.arrowOpen} width="16" height="16" style={{ position: "absolute", left: 0, top: 0, opacity: showLights ? 1 : 0 }} alt="" />
+                </span>
+                <span className="arrow-label">Světla</span>
               </button>
-            </div>
-          ))
-        )}
 
-        {/* Toggle Světla */}
-        {!fatal && (
-          <>
-            <button
-              className={`toggle arrow-toggle ${showLights ? "is-open" : "is-closed"}`}
-              onClick={() => setShowLights(!showLights)}
-              aria-label="Toggle lights panel"
-              style={{
-                marginTop: 8,
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 8,
-                padding: "6px 10px",
-                border: "1px solid white",
-                borderRadius: 6,
-                background: "transparent",
-                color: "white",
-                cursor: "pointer",
-              }}
-            >
-              <span className="arrow-stack" aria-hidden style={{ position: "relative", width: 16, height: 16, display: "inline-block" }}>
-                <img src={ICONS.arrowClosed} width="16" height="16" style={{ position: "absolute", left: 0, top: 0, opacity: showLights ? 0 : 1 }} alt="" />
-                <img src={ICONS.arrowOpen} width="16" height="16" style={{ position: "absolute", left: 0, top: 0, opacity: showLights ? 1 : 0 }} alt="" />
-              </span>
-              <span className="arrow-label">Světla</span>
-            </button>
+              {title && (
+                <div
+                  title={title}
+                  style={{
+                    maxWidth: "calc(100% - 120px)",
+                    padding: "6px 10px",
+                    borderRadius: 8,
+                    border: "1px solid rgba(255,255,255,.18)",
+                    background: "rgba(255,255,255,.08)",
+                    fontSize: 13,
+                    fontWeight: 600,
+                    whiteSpace: "nowrap",
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                  }}
+                >
+                  {title}
+                </div>
+              )}
+            </div>
 
             {showLights && (
               <div className="lights-wrap" style={{ marginTop: 6 }}>
@@ -688,7 +695,6 @@ export default function ClientPage() {
         .slider::-moz-range-track { height: 4px; background: white; border-radius: 2px; }
         .slider::-moz-range-thumb { width: 14px; height: 14px; border-radius: 50%; background: white; cursor: pointer; box-shadow: 0 0 2px black; border: none; }
 
-        /* Telefony – panel se roztáhne do šířky okna */
         @media (max-width: 720px) {
           .controls-panel {
             left: 8px !important;
