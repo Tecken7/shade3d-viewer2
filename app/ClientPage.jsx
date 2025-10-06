@@ -323,8 +323,8 @@ export default function ClientPage() {
   }, [])
 
   // data modelů + logo
-  const [files, setFiles] = useState([])
-  const [colors, setColors] = useState([])
+  const [files, setFiles] = useState([])       // {url,name,rawName,c?}
+  const [colors, setColors] = useState([])     // hex barvy pro každý model
   const [opacities, setOpacities] = useState([])
   const [visibles, setVisibles] = useState([])
   const [fatal, setFatal] = useState(null)
@@ -353,11 +353,12 @@ export default function ClientPage() {
             url: x.u,
             name: stripExt(x.n) || `Model ${i + 1}`,
             rawName: x.n,
+            c: x.c, // ← barva z manifestu (volitelně)
           }))
           if (!Fs.length) throw new Error("Manifest je prázdný.")
           setFiles(Fs)
-          const palette = ["#f5f5dc", "#8e8e8e", "#ffffff", "#ffffff", "#c0c0c0", "#e6f0ff", "#ffeedd"]
-          setColors(Fs.map((_, i) => palette[i % palette.length]))
+          const palette = ["#f5f5dc", "#8e8e8e", "#ffffff", "#ffd7a8", "#c0c0c0", "#e6f0ff", "#ffeedd"]
+          setColors(Fs.map((f, i) => f.c || palette[i % palette.length]))
           setOpacities(Fs.map(() => 1))
           setVisibles(Fs.map(() => true))
           const logoUrl = m?.logo?.url || DEFAULT_LOGO
@@ -372,13 +373,16 @@ export default function ClientPage() {
 
         const f = getParam("files")
         if (f) {
-          const arr = JSON.parse(decodeURIComponent(f))
-          const Fs = arr
-            .filter((x) => x && x.u)
-            .map((x, i) => ({ url: x.u, name: stripExt(x.n) || `Model ${i + 1}`, rawName: x.n }))
+          const arr = JSON.parse(decodeURIComponent(f)).filter((x) => x && x.u)
+          const Fs = arr.map((x, i) => ({
+            url: x.u,
+            name: stripExt(x.n) || `Model ${i + 1}`,
+            rawName: x.n,
+            c: x.c, // ← barva z query payloadu
+          }))
           setFiles(Fs)
           const palette = ["#f5f5dc", "#8e8e8e", "#ffffff", "#ffd7a8", "#c0c0c0", "#e6f0ff", "#ffeedd"]
-          setColors(Fs.map((_, i) => palette[i % palette.length]))
+          setColors(Fs.map((f, i) => f.c || palette[i % palette.length]))
           setOpacities(Fs.map(() => 1))
           setVisibles(Fs.map(() => true))
           setLogoCfg({
@@ -697,4 +701,3 @@ export default function ClientPage() {
     </div>
   )
 }
-
