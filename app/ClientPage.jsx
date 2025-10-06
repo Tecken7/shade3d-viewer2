@@ -449,7 +449,7 @@ export default function ClientPage() {
           color: "white",
           fontFamily: "sans-serif",
           fontSize: "14px",
-          ["--slider-width"]: "220px",
+          ["--slider-width"]: "150px", // kratší o ~1/3
           opacity: uiReady ? 1 : 0,
           transition: "opacity .12s ease",
           backdropFilter: "blur(3px)",
@@ -459,6 +459,7 @@ export default function ClientPage() {
           padding: "10px 12px",
           width: "clamp(260px, 38vw, 560px)",
           maxWidth: "calc(100vw - 20px)",
+          boxSizing: "border-box", // neklipuje při zmenšování
         }}
       >
         {fatal ? (
@@ -466,7 +467,7 @@ export default function ClientPage() {
         ) : (
           files.map((f, i) => (
             <div className="control-row" key={i} style={{ display: "flex", alignItems: "center", gap: 8, margin: "8px 0" }}>
-              {/* Label – na mobilu má vlastní řádek */}
+              {/* Label */}
               <div
                 className="row-label"
                 style={{
@@ -482,24 +483,33 @@ export default function ClientPage() {
 
               {/* Ovládací prvky */}
               <div className="row-controls" style={{ display: "flex", alignItems: "center", gap: 8, flex: 1, minWidth: 0 }}>
-                <ColorSwatch
-                  color={colors[i] ?? "#ffffff"}
-                  onChange={(c) => setColors((prev) => prev.map((v, idx) => (idx === i ? c : v)))}
-                  ariaLabel={`${f.name} color`}
-                />
-                <input
-                  className="slider"
-                  type="range"
-                  min={0}
-                  max={1}
-                  step={0.01}
-                  value={opacities[i] ?? 1}
-                  onChange={(e) => {
-                    const v = parseFloat(e.target.value)
-                    setOpacities((prev) => prev.map((x, idx) => (idx === i ? v : x)))
-                  }}
-                  style={{ width: "var(--slider-width, 220px)", flex: "1 1 auto" }}
-                />
+                {/* swatch + slider, slider „začíná“ hned po labelu */}
+                <div className="slider-stack" style={{ display: "flex", alignItems: "center", gap: 8, flex: 1, minWidth: 0 }}>
+                  <ColorSwatch
+                    color={colors[i] ?? "#ffffff"}
+                    onChange={(c) => setColors((prev) => prev.map((v, idx) => (idx === i ? c : v)))}
+                    ariaLabel={`${f.name} color`}
+                  />
+                  <input
+                    className="slider starts-after-label"
+                    type="range"
+                    min={0}
+                    max={1}
+                    step={0.01}
+                    value={opacities[i] ?? 1}
+                    onChange={(e) => {
+                      const v = parseFloat(e.target.value)
+                      setOpacities((prev) => prev.map((x, idx) => (idx === i ? v : x)))
+                    }}
+                    style={{
+                      width: "var(--slider-width, 150px)",
+                      maxWidth: "var(--slider-width, 150px)",
+                      flex: "1 1 auto",
+                      marginLeft: "-44px", // 36 swatch + 8 mezera
+                    }}
+                  />
+                </div>
+
                 <button
                   className={`toggle icon-btn ${visibles[i] ? "is-on" : "is-off"}`}
                   onClick={() => setVisibles((prev) => prev.map((v, idx) => (idx === i ? !v : v)))}
@@ -600,7 +610,7 @@ export default function ClientPage() {
                           step={0.1}
                           value={light.pos[axis]}
                           onChange={(e) => light.setPos({ ...light.pos, [axis]: parseFloat(e.target.value) })}
-                          style={{ flex: "1 1 auto", width: "var(--slider-width, 220px)" }}
+                          style={{ flex: "1 1 auto", width: "var(--slider-width, 150px)", maxWidth: "var(--slider-width, 150px)" }}
                         />
                       </div>
                     ))}
@@ -662,14 +672,14 @@ export default function ClientPage() {
 
       {/* Globální styly sliderů + responzivní layout panelu */}
       <style jsx global>{`
-        .slider { appearance: none; width: var(--slider-width, 220px); height: 14px; background: transparent; margin: 5px 0; display: inline-block; }
+        .slider { appearance: none; width: var(--slider-width, 150px); max-width: var(--slider-width, 150px); height: 14px; background: transparent; margin: 5px 0; display: inline-block; }
         .slider::-webkit-slider-runnable-track { height: 4px; background: white; border-radius: 2px; }
         .slider::-webkit-slider-thumb { appearance: none; width: 14px; height: 14px; border-radius: 50%; background: white; cursor: pointer; box-shadow: 0 0 2px black; margin-top: -5px; }
         .slider::-moz-range-track { height: 4px; background: white; border-radius: 2px; }
         .slider::-moz-range-thumb { width: 14px; height: 14px; border-radius: 50%; background: white; cursor: pointer; box-shadow: 0 0 2px black; border: none; }
 
         /* --- RESPONSIVE --- */
-        @media (max-width: 560px) {
+        @media (max-width: 720px) {
           .controls-panel {
             left: 8px !important;
             right: 8px;
@@ -678,36 +688,25 @@ export default function ClientPage() {
             --slider-width: 100%;
           }
           .control-row {
-            flex-direction: column;            /* label NAHORU */
+            flex-direction: column;
             align-items: stretch !important;
             gap: 6px !important;
           }
           .control-row .row-label {
             width: 100% !important;
-            white-space: normal !important;    /* delší názvy se zalomí */
+            white-space: normal !important;   /* delší názvy se zalomí */
             word-break: break-word;
             opacity: .95;
           }
-          .control-row .row-controls {
-            width: 100%;
-          }
-          .control-row .slider {
-            width: 100% !important;            /* slider se roztáhne */
-            flex: 1 1 auto;
-          }
-          .control-row .icon-btn {
-            align-self: flex-end;              /* oko vpravo */
-          }
-
-          /* Světla – svislé řádky, slider 100% */
-          .lights-wrap .axis-row {
-            gap: 8px !important;
-          }
-          .lights-wrap .axis-row .axis-label {
-            width: 22px !important;
+          .control-row .row-controls { width: 100%; }
+          .control-row .starts-after-label {
+            margin-left: 0 !important;
+            width: 100% !important;
+            max-width: 100% !important;
           }
           .lights-wrap .axis-row .slider {
             width: 100% !important;
+            max-width: 100% !important;
             flex: 1 1 auto;
           }
         }
