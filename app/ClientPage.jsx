@@ -455,8 +455,8 @@ export default function ClientPage() {
           background: "rgba(0,0,0,.25)",
           border: "1px solid rgba(255,255,255,.15)",
           borderRadius: 8,
-          padding: "10px 12px",
-          width: "clamp(260px, 38vw, 560px)",
+          padding: "8px 10px",                  // kompaktnější
+          width: "clamp(240px, 30vw, 420px)",   // užší panel
           maxWidth: "calc(100vw - 20px)",
           boxSizing: "border-box",
         }}
@@ -470,14 +470,14 @@ export default function ClientPage() {
               key={i}
               style={{
                 display: "grid",
-                gridTemplateColumns: "max-content 1fr 28px", // label | control | eye
+                gridTemplateColumns: "minmax(110px, 20ch) 1fr 26px", // label | control | eye
                 alignItems: "center",
-                columnGap: 8,
+                columnGap: 6,
                 rowGap: 6,
-                margin: "8px 0",
+                margin: "6px 0",
               }}
             >
-              {/* Label (šířka = text) */}
+              {/* Label */}
               <div
                 className="row-label"
                 style={{
@@ -490,15 +490,8 @@ export default function ClientPage() {
                 {stripExt(f.name)}:
               </div>
 
-              {/* Control area: slider (100%) + swatch přilepený vlevo */}
-              <div
-                className="row-control"
-                style={{
-                  position: "relative",
-                  minWidth: 0,
-                }}
-              >
-                {/* slider – plynule, ale s minimální délkou pro použitelnost */}
+              {/* Control area: slider (100%) + swatch vlevo přes začátek dráhy */}
+              <div className="row-control" style={{ position: "relative", minWidth: 0 }}>
                 <input
                   className="slider"
                   type="range"
@@ -510,43 +503,16 @@ export default function ClientPage() {
                     const v = parseFloat(e.target.value)
                     setOpacities((prev) => prev.map((x, idx) => (idx === i ? v : x)))
                   }}
-                  style={{
-                    width: "100%",
-                    minWidth: 140, // ← minimální délka, aby šel pohodlně ovládat
-                  }}
+                  style={{ width: "100%", minWidth: 140 }}
                 />
-
-                {/* swatch překrývá levý začátek dráhy → slider vizuálně "začíná" hned za názvem */}
-                <div
-                  style={{
-                    position: "absolute",
-                    left: 0,
-                    top: "50%",
-                    transform: "translateY(-50%)",
-                    pointerEvents: "auto",
-                  }}
-                >
+                <div style={{ position: "absolute", left: 0, top: "50%", transform: "translateY(-50%)" }}>
                   <ColorSwatch
                     color={colors[i] ?? "#ffffff"}
                     onChange={(c) => setColors((prev) => prev.map((v, idx) => (idx === i ? c : v)))}
                     ariaLabel={`${f.name} color`}
                   />
                 </div>
-
-                {/* aby slider nebyl pod swatchem nekliknutelný, posuň jeho „klikací“ začátek pod swatchem doprava paddingem na wrapperu */}
-                <div
-                  aria-hidden
-                  style={{
-                    position: "absolute",
-                    left: 0,
-                    top: 0,
-                    bottom: 0,
-                    width: 44, // 36 swatch + 8px vizuální mezera
-                    pointerEvents: "none",
-                    background: "transparent",
-                  }}
-                />
-                {/* vizuálně to nechává slider podjet pod swatch, ale uživatel tahá za palec bez kolize */}
+                <div aria-hidden style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: 44, pointerEvents: "none" }} />
               </div>
 
               {/* Eye button */}
@@ -556,8 +522,8 @@ export default function ClientPage() {
                 aria-label={visibles[i] ? `Hide ${f.name}` : `Show ${f.name}`}
                 style={{
                   position: "relative",
-                  width: 28,
-                  height: 24,
+                  width: 26,      // menší
+                  height: 22,     // menší
                   padding: 0,
                   display: "inline-flex",
                   alignItems: "center",
@@ -573,16 +539,16 @@ export default function ClientPage() {
                 <img
                   src={ICONS.eye}
                   alt=""
-                  width="20"
-                  height="20"
-                  style={{ position: "absolute", inset: 0, width: 20, height: 20, margin: "auto", opacity: visibles[i] ? 1 : 0, transition: "opacity .06s linear" }}
+                  width="18"
+                  height="18"
+                  style={{ position: "absolute", inset: 0, width: 18, height: 18, margin: "auto", opacity: visibles[i] ? 1 : 0, transition: "opacity .06s linear" }}
                 />
                 <img
                   src={ICONS.eyeOff}
                   alt=""
-                  width="20"
-                  height="20"
-                  style={{ position: "absolute", inset: 0, width: 20, height: 20, margin: "auto", opacity: visibles[i] ? 0 : 1, transition: "opacity .06s linear" }}
+                  width="18"
+                  height="18"
+                  style={{ position: "absolute", inset: 0, width: 18, height: 18, margin: "auto", opacity: visibles[i] ? 0 : 1, transition: "opacity .06s linear" }}
                 />
               </button>
             </div>
@@ -597,7 +563,7 @@ export default function ClientPage() {
               onClick={() => setShowLights(!showLights)}
               aria-label="Toggle lights panel"
               style={{
-                marginTop: 10,
+                marginTop: 8,
                 display: "inline-flex",
                 alignItems: "center",
                 gap: 8,
@@ -617,7 +583,7 @@ export default function ClientPage() {
             </button>
 
             {showLights && (
-              <div className="lights-wrap" style={{ marginTop: 8 }}>
+              <div className="lights-wrap" style={{ marginTop: 6 }}>
                 <div className="lights-row" style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
                   <img src={ICONS.bulb} alt="" width="16" height="16" style={{ width: 16, height: 16 }} />
                   <span>Light Intensity</span>
@@ -632,7 +598,7 @@ export default function ClientPage() {
                   { label: "Light 3 Position", pos: lightPos3, setPos: setLightPos3 },
                   { label: "Light 4 Position", pos: lightPos4, setPos: setLightPos4 },
                 ].map((light, idx) => (
-                  <div key={idx} className="light-block" style={{ marginTop: 10 }}>
+                  <div key={idx} className="light-block" style={{ marginTop: 8 }}>
                     <div className="lights-row" style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
                       <img src={ICONS.flashlight} alt="" width="16" height="16" style={{ width: 16, height: 16 }} />
                       <span>{light.label}</span>
@@ -692,7 +658,6 @@ export default function ClientPage() {
               </Suspense>
             </group>
 
-            {/* Auto-center/fit + Trackball (uvnitř Canvas) */}
             <AutoCenterAndFrame
               rootRef={rootRef}
               depsKey={loadedCount === files.length ? `ready-${files.length}` : `loading-${loadedCount}`}
@@ -716,7 +681,6 @@ export default function ClientPage() {
         .slider::-moz-range-track { height: 4px; background: white; border-radius: 2px; }
         .slider::-moz-range-thumb { width: 14px; height: 14px; border-radius: 50%; background: white; cursor: pointer; box-shadow: 0 0 2px black; border: none; }
 
-        /* --- RESPONSIVE --- */
         @media (max-width: 720px) {
           .controls-panel {
             left: 8px !important;
@@ -725,7 +689,7 @@ export default function ClientPage() {
             max-width: calc(100vw - 16px) !important;
           }
           .control-row {
-            grid-template-columns: 1fr 28px !important; /* control | eye */
+            grid-template-columns: 1fr 26px !important; /* control | eye */
           }
           .control-row .row-label {
             grid-column: 1 / -1;  /* label přes celý řádek */
