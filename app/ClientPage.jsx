@@ -342,6 +342,20 @@ export default function ClientPage() {
   const centerParam = (getParam("center") || "combined").toLowerCase()
   const centerMode = ["per", "combined", "none"].includes(centerParam) ? centerParam : "combined"
 
+  /* ---------- Panel width observer (přepne layout dřív, aby se oko nikdy nepřekrývalo) ---------- */
+  const panelRef = useRef(null)
+  const [narrowPanel, setNarrowPanel] = useState(false) // true => label na vlastní řádek (mobilní rozvrh)
+  useEffect(() => {
+    if (!panelRef.current) return
+    const ro = new ResizeObserver((entries) => {
+      const w = entries[0].contentRect.width
+      // hranice ~ (label 80 + swatch 36 + slider min 140 + eye 26 + mezery)
+      setNarrowPanel(w < 310)
+    })
+    ro.observe(panelRef.current)
+    return () => ro.disconnect()
+  }, [])
+
   // init – manifest > files
   useEffect(() => {
     ;(async () => {
@@ -440,7 +454,8 @@ export default function ClientPage() {
 
       {/* Ovládací panel */}
       <div
-        className="controls-panel"
+        ref={panelRef}
+        className={`controls-panel ${narrowPanel ? "is-narrow" : ""}`}
         style={{
           position: "absolute",
           top: 10,
@@ -472,7 +487,7 @@ export default function ClientPage() {
                 display: "grid",
                 gridTemplateColumns: "max-content 36px 1fr 26px", // label | swatch | slider | eye
                 alignItems: "center",
-                columnGap: 4,             // skoro žádná mezera mezi názvem a swatchem
+                columnGap: 4,
                 rowGap: 6,
                 margin: "6px 0",
               }}
@@ -499,7 +514,7 @@ export default function ClientPage() {
                 />
               </div>
 
-              {/* Slider – zabere zbytek místa, ale s minimální délkou pro použitelnost */}
+              {/* Slider – zkrácený o 18 px na pravé straně, aby palec nevlézal k oku */}
               <div className="row-slider" style={{ minWidth: 0 }}>
                 <input
                   className="slider"
@@ -512,11 +527,11 @@ export default function ClientPage() {
                     const v = parseFloat(e.target.value)
                     setOpacities((prev) => prev.map((x, idx) => (idx === i ? v : x)))
                   }}
-                  style={{ width: "100%", minWidth: 140 }}
+                  style={{ width: "calc(100% - 18px)", minWidth: 140 }}
                 />
               </div>
 
-              {/* Eye button – v samostatném sloupci, už se nepřekrývá se sliderem */}
+              {/* Eye */}
               <button
                 className={`toggle icon-btn ${visibles[i] ? "is-on" : "is-off"}`}
                 onClick={() => setVisibles((prev) => prev.map((v, idx) => (idx === i ? !v : v)))}
@@ -682,6 +697,19 @@ export default function ClientPage() {
         .slider::-moz-range-track { height: 4px; background: white; border-radius: 2px; }
         .slider::-moz-range-thumb { width: 14px; height: 14px; border-radius: 50%; background: white; cursor: pointer; box-shadow: 0 0 2px black; border: none; }
 
+        /* Přepnutí na „mobilní“ layout podle reálné šířky panelu (class .is-narrow) */
+        .controls-panel.is-narrow .control-row {
+          grid-template-columns: 36px 1fr 26px !important; /* swatch | slider | eye */
+        }
+        .controls-panel.is-narrow .row-label {
+          grid-column: 1 / -1;      /* label přes celý řádek */
+          white-space: normal !important;
+          word-break: break-word;
+          margin-bottom: 2px;
+          opacity: .95;
+        }
+
+        /* Pro jistotu i klasický viewport breakpoint (telefony) */
         @media (max-width: 720px) {
           .controls-panel {
             left: 8px !important;
@@ -690,16 +718,14 @@ export default function ClientPage() {
             max-width: calc(100vw - 16px) !important;
           }
           .control-row {
-            grid-template-columns: 36px 1fr 26px !important; /* swatch | slider | eye */
+            grid-template-columns: 36px 1fr 26px !important;
           }
-          .control-row .row-label {
-            grid-column: 1 / -1;  /* label přes celý řádek */
+          .row-label {
+            grid-column: 1 / -1;
             white-space: normal !important;
             word-break: break-word;
-            opacity: .95;
             margin-bottom: 2px;
           }
-          .row-slider .slider { width: 100% !important; min-width: 140px !important; }
         }
       `}</style>
     </div>
