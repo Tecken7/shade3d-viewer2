@@ -356,7 +356,7 @@ export default function ClientPage() {
           }))
           if (!Fs.length) throw new Error("Manifest je prázdný.")
           setFiles(Fs)
-          const palette = ["#f5f5dc", "#8e8e8e", "#ffffff", "#ffd7a8", "#c0c0c0", "#e6f0ff", "#ffeedd"]
+          const palette = ["#f5f5dc", "#8e8e8e", "#ffffff", "#ffffff", "#c0c0c0", "#e6f0ff", "#ffeedd"]
           setColors(Fs.map((_, i) => palette[i % palette.length]))
           setOpacities(Fs.map(() => 1))
           setVisibles(Fs.map(() => true))
@@ -697,3 +697,4 @@ export default function ClientPage() {
     </div>
   )
 }
+
