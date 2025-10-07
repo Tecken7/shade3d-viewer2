@@ -51,10 +51,7 @@ function inferExt(nameOrUrl) {
 }
 
 /* ---------- Auto Smooth (Blender-like) ---------- */
-/**
- * Vypočítá vrcholové normály s prahováním podle úhlu (deg).
- * Počítá na neindexované geometrii, aby měl každý roh vlastní normálu.
- */
+/** Vypočítá vrcholové normály s prahováním podle úhlu (deg). */
 function autoSmoothGeometry(geometry, angleDeg = 30) {
   const angle = Math.max(0, Math.min(89.9, angleDeg))
   const angleRad = (angle * Math.PI) / 180
@@ -450,12 +447,13 @@ export default function ClientPage() {
             name: stripExt(x.n) || `Model ${i + 1}`,
             rawName: x.n,
             c: x.c,
+            o: typeof x.o === "number" ? x.o : 1,
           }))
           if (!Fs.length) throw new Error("Manifest je prázdný.")
           setFiles(Fs)
           const palette = ["#f5f5dc", "#8e8e8e", "#ffffff", "#ffd7a8", "#c0c0c0", "#e6f0ff", "#ffeedd"]
           setColors(Fs.map((f, i) => f.c || palette[i % palette.length]))
-          setOpacities(Fs.map(() => 1))
+          setOpacities(Fs.map((f) => (typeof f.o === "number" ? clamp01(f.o) : 1)))
           setVisibles(Fs.map(() => true))
           setTitle(typeof m?.title === "string" ? m.title : (getParam("title") ?? null))
           const logoUrl = m?.logo?.url || DEFAULT_LOGO
@@ -477,11 +475,17 @@ export default function ClientPage() {
           if (!Array.isArray(arr)) throw new Error("Neplatný formát parametru ?files=")
           const Fs = arr
             .filter((x) => x && x.u)
-            .map((x, i) => ({ url: x.u, name: stripExt(x.n) || `Model ${i + 1}`, rawName: x.n, c: x.c }))
+            .map((x, i) => ({
+              url: x.u,
+              name: stripExt(x.n) || `Model ${i + 1}`,
+              rawName: x.n,
+              c: x.c,
+              o: typeof x.o === "number" ? x.o : 1,
+            }))
           setFiles(Fs)
           const palette = ["#f5f5dc", "#8e8e8e", "#ffffff", "#ffd7a8", "#c0c0c0", "#e6f0ff", "#ffeedd"]
           setColors(Fs.map((f, i) => f.c || palette[i % palette.length]))
-          setOpacities(Fs.map(() => 1))
+          setOpacities(Fs.map((f) => (typeof f.o === "number" ? clamp01(f.o) : 1)))
           setVisibles(Fs.map(() => true))
           setTitle(getParam("title") ?? null)
           setLogoCfg({
@@ -604,7 +608,7 @@ export default function ClientPage() {
                   />
                 </div>
 
-                {/* Slider – jednotná délka */}
+                {/* Slider – jednotná délka, nezasahuje pod oko */}
                 <div className="row-slider" style={{ minWidth: 0 }}>
                   <input
                     className="slider"
