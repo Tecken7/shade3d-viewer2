@@ -50,18 +50,74 @@ function inferExt(nameOrUrl) {
   return m ? m[1].toLowerCase() : ""
 }
 
-// Robustní parsování ?files= (raw JSON i 1–2× enkódované)
-function parseFilesParam(raw) {
-  if (!raw) return { arr: [], error: null }
-  const tryJSON = (s) => {
-    try { return JSON.parse(s) } catch { return null }
+/* ---------- Auto Smooth (Blender-like) ---------- */
+/**
+ * Vypočítá vrcholové normály s prahováním podle úhlu (deg).
+ * Počítá na neindexované geometrii, aby měl každý roh vlastní normálu.
+ */
+function autoSmoothGeometry(geometry, angleDeg = 30) {
+  const angle = Math.max(0, Math.min(89.9, angleDeg))
+  const angleRad = (angle * Math.PI) / 180
+  const cosThresh = Math.cos(angleRad)
+
+  const g = geometry.index ? geometry.toNonIndexed() : geometry.clone()
+  const pos = g.getAttribute("position")
+  const vCount = pos.count
+  const triCount = vCount / 3
+
+  // face normals
+  const faceNormals = new Array(triCount)
+  const a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3()
+  const cb = new THREE.Vector3(), ab = new THREE.Vector3()
+  for (let f = 0; f < triCount; f++) {
+    const i0 = f * 3, i1 = i0 + 1, i2 = i0 + 2
+    a.fromBufferAttribute(pos, i0)
+    b.fromBufferAttribute(pos, i1)
+    c.fromBufferAttribute(pos, i2)
+    cb.subVectors(c, b)
+    ab.subVectors(a, b)
+    cb.cross(ab).normalize()
+    faceNormals[f] = cb.clone()
   }
-  let arr = null
-  arr = arr || tryJSON(raw)
-  arr = arr || tryJSON(decodeURIComponent(raw))
-  try { arr = arr || tryJSON(decodeURIComponent(decodeURIComponent(raw))) } catch {}
-  if (!Array.isArray(arr)) return { arr: [], error: "Neplatný formát parametru ?files= (nelze parsovat JSON)." }
-  return { arr, error: null }
+
+  // skupiny rohů podle pozice (s tolerancí)
+  const groups = new Map()
+  const keyOf = (ix) =>
+    `${pos.getX(ix).toFixed(5)},${pos.getY(ix).toFixed(5)},${pos.getZ(ix).toFixed(5)}`
+  for (let i = 0; i < vCount; i++) {
+    const k = keyOf(i)
+    let arr = groups.get(k)
+    if (!arr) { arr = []; groups.set(k, arr) }
+    arr.push(i)
+  }
+
+  // spočítat normály pro každý roh
+  const normals = new Float32Array(vCount * 3)
+  const tmp = new THREE.Vector3()
+
+  groups.forEach((cornerIndices) => {
+    const localFaceNs = cornerIndices.map((ci) => faceNormals[Math.floor(ci / 3)])
+    for (let idx = 0; idx < cornerIndices.length; idx++) {
+      const ci = cornerIndices[idx]
+      const nRef = localFaceNs[idx]
+
+      let nx = 0, ny = 0, nz = 0
+      for (let j = 0; j < localFaceNs.length; j++) {
+        const nj = localFaceNs[j]
+        if (nRef.dot(nj) >= cosThresh) { nx += nj.x; ny += nj.y; nz += nj.z }
+      }
+      tmp.set(nx, ny, nz)
+      if (tmp.lengthSq() === 0) tmp.copy(nRef)
+      tmp.normalize()
+      const w = ci * 3
+      normals[w] = tmp.x; normals[w + 1] = tmp.y; normals[w + 2] = tmp.z
+    }
+  })
+
+  g.setAttribute("normal", new THREE.BufferAttribute(normals, 3))
+  g.computeBoundingBox()
+  g.computeBoundingSphere()
+  return g
 }
 
 /* ---------- Loader (overlay) ---------- */
@@ -85,7 +141,7 @@ function InlineLoader({ text }) {
 }
 
 /* ---------- AnyModel (OBJ/STL/PLY) ---------- */
-function AnyModel({ name, url, color, opacity, visible, onLoaded }) {
+function AnyModel({ name, url, color, opacity, visible, onLoaded, autoSmooth, smoothAngle }) {
   const [object3D, setObject3D] = useState(null)
   const [loading, setLoading] = useState(true)
   const ext = useMemo(() => inferExt(name || url), [name, url])
@@ -101,6 +157,7 @@ function AnyModel({ name, url, color, opacity, visible, onLoaded }) {
       depthWrite: opacity === 1,
     })
 
+  // načtení objektu
   useEffect(() => {
     let cancelled = false
     setLoading(true)
@@ -109,16 +166,18 @@ function AnyModel({ name, url, color, opacity, visible, onLoaded }) {
         let obj
         if (ext === "stl") {
           const geom = await new STLLoader().loadAsync(url)
-          if (!geom.attributes.normal) geom.computeVertexNormals?.()
+          if (!geom.attributes.normal) geom.computeVertexNormals()
           obj = new THREE.Mesh(geom, makeMaterial())
         } else if (ext === "ply") {
           const geom = await new PLYLoader().loadAsync(url)
-          if (!geom.attributes.normal) geom.computeVertexNormals?.()
+          if (!geom.attributes.normal) geom.computeVertexNormals()
           obj = new THREE.Mesh(geom, makeMaterial())
         } else {
           obj = await new OBJLoader().loadAsync(url)
           const mat = makeMaterial()
-          obj.traverse((child) => { if (child.isMesh) child.material = mat })
+          obj.traverse((child) => {
+            if (child.isMesh) child.material = mat
+          })
         }
         if (!cancelled) {
           setObject3D(obj)
@@ -131,14 +190,36 @@ function AnyModel({ name, url, color, opacity, visible, onLoaded }) {
       }
     })()
     return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [url, ext])
 
+  // (PATCH) Přepočet GEOMETRIE jen při změně autoSmooth / smoothAngle nebo po načtení
+  useEffect(() => {
+    if (!object3D) return
+    object3D.traverse((child) => {
+      if (!child.isMesh) return
+      if (!child.userData._baseGeom) child.userData._baseGeom = child.geometry
+      const base = child.userData._baseGeom
+      const newGeom = autoSmooth
+        ? autoSmoothGeometry(base, smoothAngle)
+        : (() => { const g = base.clone(); g.computeVertexNormals(); return g })()
+
+      if (child.userData._derivedGeom && child.userData._derivedGeom !== base) {
+        child.userData._derivedGeom.dispose()
+      }
+      child.geometry = newGeom
+      child.userData._derivedGeom = newGeom
+    })
+  }, [object3D, autoSmooth, smoothAngle])
+
+  // (PATCH) Materiál zvlášť – rychlé, neřeší geometrii
   useEffect(() => {
     if (!object3D) return
     const mat = makeMaterial()
-    if (object3D.isMesh) object3D.material = mat
-    else object3D.traverse((child) => { if (child.isMesh) child.material = mat })
-  }, [color, opacity, object3D])
+    object3D.traverse((child) => {
+      if (child.isMesh) child.material = mat
+    })
+  }, [object3D, color, opacity])
 
   if (!object3D) return loading ? <InlineLoader text={`Načítám ${name || url}`} /> : null
   return visible ? <primitive object={object3D} /> : null
@@ -329,21 +410,35 @@ export default function ClientPage() {
   }, [])
 
   const [title, setTitle] = useState(null)
+
+  // modely + vzhled
   const [files, setFiles] = useState([])
   const [colors, setColors] = useState([])
   const [opacities, setOpacities] = useState([])
   const [visibles, setVisibles] = useState([])
   const [fatal, setFatal] = useState(null)
 
+  // auto smooth
+  const [autoSmooth, setAutoSmooth] = useState((getParam("smooth") ?? "1") !== "0")
+  const [smoothAngle, setSmoothAngle] = useState(() => {
+    const v = parseFloat(getParam("smoothAngle") ?? "30")
+    return isFinite(v) ? Math.max(0, Math.min(80, v)) : 30
+  })
+
   const [logoCfg, setLogoCfg] = useState({ url: DEFAULT_LOGO, opacity: 0.9, width: 160, pos: "bc" })
+
+  // Trackball target
   const [cameraTarget, setCameraTarget] = useState([0, 0, 0])
+
+  // načtené objekty count (trigger centra/fitu)
   const [loadedCount, setLoadedCount] = useState(0)
   const handleModelLoaded = () => setLoadedCount((n) => n + 1)
 
+  // parametr centrování
   const centerParam = (getParam("center") || "combined").toLowerCase()
   const centerMode = ["per", "combined", "none"].includes(centerParam) ? centerParam : "combined"
 
-  // init – manifest / files param
+  // init – manifest > files
   useEffect(() => {
     ;(async () => {
       try {
@@ -375,8 +470,11 @@ export default function ClientPage() {
 
         const f = getParam("files")
         if (f) {
-          const { arr, error } = parseFilesParam(f)
-          if (error) { setFatal(error); return }
+          // bezpečný parse (raw i URL-enkódované)
+          let arr = null
+          try { arr = JSON.parse(f) } catch {}
+          if (!arr) { try { arr = JSON.parse(decodeURIComponent(f)) } catch {} }
+          if (!Array.isArray(arr)) throw new Error("Neplatný formát parametru ?files=")
           const Fs = arr
             .filter((x) => x && x.u)
             .map((x, i) => ({ url: x.u, name: stripExt(x.n) || `Model ${i + 1}`, rawName: x.n, c: x.c }))
@@ -562,50 +660,76 @@ export default function ClientPage() {
               </div>
             ))}
 
-            {/* Světla + titul vedle tlačítka */}
-            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
-              <button
-                className={`toggle arrow-toggle ${showLights ? "is-open" : "is-closed"}`}
-                onClick={() => setShowLights(!showLights)}
-                aria-label="Toggle lights panel"
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: 8,
-                  padding: "6px 10px",
-                  border: "1px solid white",
-                  borderRadius: 6,
-                  background: "transparent",
-                  color: "white",
-                  cursor: "pointer",
-                }}
-              >
-                <span className="arrow-stack" aria-hidden style={{ position: "relative", width: 16, height: 16, display: "inline-block" }}>
-                  <img src={ICONS.arrowClosed} width="16" height="16" style={{ position: "absolute", left: 0, top: 0, opacity: showLights ? 0 : 1 }} alt="" />
-                  <img src={ICONS.arrowOpen} width="16" height="16" style={{ position: "absolute", left: 0, top: 0, opacity: showLights ? 1 : 0 }} alt="" />
-                </span>
-                <span className="arrow-label">Světla</span>
-              </button>
-
-              {title && (
-                <div
-                  title={title}
+            {/* Řádek: Světla + Titulek + Auto Smooth */}
+            <div style={{ display: "grid", gridTemplateColumns: "auto 1fr", alignItems: "center", gap: 8, marginTop: 8 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                <button
+                  className={`toggle arrow-toggle ${showLights ? "is-open" : "is-closed"}`}
+                  onClick={() => setShowLights(!showLights)}
+                  aria-label="Toggle lights panel"
                   style={{
-                    maxWidth: "calc(100% - 120px)",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 8,
                     padding: "6px 10px",
-                    borderRadius: 8,
-                    border: "1px solid rgba(255,255,255,.18)",
-                    background: "rgba(255,255,255,.08)",
-                    fontSize: 13,
-                    fontWeight: 600,
-                    whiteSpace: "nowrap",
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
+                    border: "1px solid white",
+                    borderRadius: 6,
+                    background: "transparent",
+                    color: "white",
+                    cursor: "pointer",
                   }}
                 >
-                  {title}
-                </div>
-              )}
+                  <span className="arrow-stack" aria-hidden style={{ position: "relative", width: 16, height: 16, display: "inline-block" }}>
+                    <img src={ICONS.arrowClosed} width="16" height="16" style={{ position: "absolute", left: 0, top: 0, opacity: showLights ? 0 : 1 }} alt="" />
+                    <img src={ICONS.arrowOpen} width="16" height="16" style={{ position: "absolute", left: 0, top: 0, opacity: showLights ? 1 : 0 }} alt="" />
+                  </span>
+                  <span className="arrow-label">Světla</span>
+                </button>
+
+                {/* Titulek (pokud je) */}
+                {title && (
+                  <div
+                    title={title}
+                    style={{
+                      maxWidth: 220,
+                      padding: "6px 10px",
+                      borderRadius: 8,
+                      border: "1px solid rgba(255,255,255,.18)",
+                      background: "rgba(255,255,255,.08)",
+                      fontSize: 13,
+                      fontWeight: 600,
+                      whiteSpace: "nowrap",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                    }}
+                  >
+                    {title}
+                  </div>
+                )}
+              </div>
+
+              {/* Auto Smooth ovládání */}
+              <div style={{ display: "flex", alignItems: "center", gap: 8, justifyContent: "flex-end" }}>
+                <label style={{ display: "inline-flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
+                  <input
+                    type="checkbox"
+                    checked={autoSmooth}
+                    onChange={(e) => setAutoSmooth(e.target.checked)}
+                  />
+                  <span>Auto smooth</span>
+                </label>
+                <span style={{ opacity: 0.8, fontSize: 12 }}>Úhel: {Math.round(smoothAngle)}°</span>
+                <input
+                  className="slider"
+                  type="range"
+                  min={0}
+                  max={80}
+                  step={1}
+                  value={smoothAngle}
+                  onChange={(e) => setSmoothAngle(parseFloat(e.target.value))}
+                  style={{ width: 120 }}
+                />
+              </div>
             </div>
 
             {showLights && (
@@ -679,12 +803,13 @@ export default function ClientPage() {
                     opacity={opacities[i] ?? 1}
                     visible={visibles[i] ?? true}
                     onLoaded={handleModelLoaded}
+                    autoSmooth={autoSmooth}
+                    smoothAngle={smoothAngle}
                   />
                 ))}
               </Suspense>
             </group>
 
-            {/* Auto-center/fit + Trackball */}
             <AutoCenterAndFrame
               rootRef={rootRef}
               depsKey={loadedCount === files.length ? `ready-${files.length}` : `loading-${loadedCount}`}
