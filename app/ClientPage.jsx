@@ -72,7 +72,8 @@ function autoSmoothGeometry(geometry, angleDeg = 30) {
   }
 
   const groups = new Map()
-  const keyOf = (ix) => `${pos.getX(ix).toFixed(5)},${pos.getY(ix).toFixed(5)},${pos.getZ(ix).toFixed(5)}`
+  const keyOf = (ix) =>
+    `${pos.getX(ix).toFixed(5)},${pos.getY(ix).toFixed(5)},${pos.getZ(ix).toFixed(5)}`
   for (let i = 0; i < vCount; i++) {
     const k = keyOf(i)
     let arr = groups.get(k)
@@ -112,7 +113,16 @@ function autoSmoothGeometry(geometry, angleDeg = 30) {
 function InlineLoader({ text }) {
   return (
     <Html center>
-      <div style={{ background: "rgba(0,0,0,0.7)", padding: "16px 28px", borderRadius: 10, color: "white", fontFamily: "sans-serif", fontSize: 16 }}>
+      <div
+        style={{
+          background: "rgba(0,0,0,0.7)",
+          padding: "16px 28px",
+          borderRadius: 10,
+          color: "white",
+          fontFamily: "sans-serif",
+          fontSize: 16,
+        }}
+      >
         ⏳ {text || "Načítám…"}
       </div>
     </Html>
@@ -358,7 +368,7 @@ function AutoCenterAndFrame({
     camera.zoom = Math.max(newZoom, 0.01)
     camera.position.set(ctr.x, ctr.y, ctr.z + Math.abs(camera.position.z))
     camera.updateProjectionMatrix()
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [depsKey, size.width, size.height, isMobile, desktopScale, mobileScale, margin, centerMode])
 
   return null
@@ -375,14 +385,18 @@ function EnvLoader({ hdriUrl, envTexRef }) {
       scene.environment = null
       return
     }
+
     const loader = new RGBELoader()
     loader.setDataType(THREE.UnsignedByteType)
+
+    const pmrem = new THREE.PMREMGenerator(gl)
+    pmrem.compileEquirectangularShader()
+
     loader.load(hdriUrl, (hdr) => {
-      if (disposed) return
-      const pmrem = new THREE.PMREMGenerator(gl)
-      pmrem.compileEquirectangularShader()
+      if (disposed) { hdr?.dispose?.(); return }
       const envTex = pmrem.fromEquirectangular(hdr).texture
       hdr.dispose()
+
       // uklid starého
       if (envTexRef.current && envTexRef.current !== envTex) {
         envTexRef.current.dispose?.()
@@ -390,7 +404,11 @@ function EnvLoader({ hdriUrl, envTexRef }) {
       envTexRef.current = envTex
       scene.environment = envTex
     })
-    return () => { disposed = true }
+
+    return () => {
+      disposed = true
+      pmrem.dispose()
+    }
   }, [hdriUrl, scene, gl, envTexRef])
   return null
 }
@@ -401,7 +419,7 @@ function EnvLoader({ hdriUrl, envTexRef }) {
 const HDRI_PRESETS = {
   none: null,
   studioSoft: "/hdr/studio_small_03_1k.hdr",
-  // můžeš si přidat další soubory do /public/hdr a jen je sem doplnit
+  // přidej další soubory do /public/hdr a sem jen doplň klíč
   // grayRoom: "/hdr/studio_small_08_1k.hdr",
   // overcast: "/hdr/overcast_park_1k.hdr",
 }
@@ -416,7 +434,10 @@ export default function ClientPage() {
   const [showLights, setShowLights] = useState(false)
 
   const [uiReady, setUiReady] = useState(false)
-  useEffect(() => { const id = requestAnimationFrame(() => setUiReady(true)); return () => cancelAnimationFrame(id) }, [])
+  useEffect(() => {
+    const id = requestAnimationFrame(() => setUiReady(true))
+    return () => cancelAnimationFrame(id)
+  }, [])
 
   const [isMobile, setIsMobile] = useState(false)
   useEffect(() => {
@@ -485,7 +506,6 @@ export default function ClientPage() {
           setRoughnesses(Fs.map((f) => (typeof f.r === "number" ? clamp01(f.r) : 0.5)))
           setMetalnesses(Fs.map((f) => (typeof f.m === "number" ? clamp01(f.m) : 0.5)))
           setTitle(typeof m?.title === "string" ? m.title : (getParam("title") ?? null))
-          // možnost přepsat prostředí i z manifestu (m.env) – když tam bude, použijeme ho
           const envKey = (m?.env && HDRI_PRESETS[m.env] !== undefined) ? m.env : (getParam("env") || hdriKey)
           setHdriKey(envKey)
 
@@ -525,7 +545,6 @@ export default function ClientPage() {
           setRoughnesses(Fs.map((f) => (typeof f.r === "number" ? clamp01(f.r) : 0.5)))
           setMetalnesses(Fs.map((f) => (typeof f.m === "number" ? clamp01(f.m) : 0.5)))
           setTitle(getParam("title") ?? null)
-          // prostředí z URL (?env=) má přednost
           const envKey = getParam("env")
           if (envKey && HDRI_PRESETS[envKey] !== undefined) setHdriKey(envKey)
 
@@ -607,12 +626,24 @@ export default function ClientPage() {
         ) : (
           <>
             {files.map((f, i) => (
-              <div key={i} className="control-row" style={{
-                display: "grid", gridTemplateColumns: "36px 1fr 26px",
-                alignItems: "center", columnGap: 6, rowGap: 6, margin: "6px 0",
-              }}>
+              <div
+                key={i}
+                className="control-row"
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "36px 1fr 26px",
+                  alignItems: "center",
+                  columnGap: 6,
+                  rowGap: 6,
+                  margin: "6px 0",
+                }}
+              >
                 {/* Label */}
-                <div className="row-label" style={{ gridColumn: "1 / -1", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={f.rawName || f.name}>
+                <div
+                  className="row-label"
+                  style={{ gridColumn: "1 / -1", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+                  title={f.rawName || f.name}
+                >
                   {stripExt(f.name)}:
                 </div>
 
@@ -653,8 +684,8 @@ export default function ClientPage() {
                     border: "1px solid white", borderRadius: 6, color: "white", cursor: "pointer",
                   }}
                 >
-                  <img src={ICONS.eye} alt="" width="18" height="18" style={{ position: "absolute", inset: 0, width: 18, height: 18, margin: "auto", opacity: visibles[i] ? 1 : 0, transition: "opacity .06s linear" }}/>
-                  <img src={ICONS.eyeOff} alt="" width="18" height="18" style={{ position: "absolute", inset: 0, width: 18, height: 18, margin: "auto", opacity: visibles[i] ? 0 : 1, transition: "opacity .06s linear" }}/>
+                  <img src={ICONS.eye} alt="" width="18" height="18" style={{ position: "absolute", inset: 0, width: 18, height: 18, margin: "auto", opacity: visibles[i] ? 1 : 0, transition: "opacity .06s linear" }} />
+                  <img src={ICONS.eyeOff} alt="" width="18" height="18" style={{ position: "absolute", inset: 0, width: 18, height: 18, margin: "auto", opacity: visibles[i] ? 0 : 1, transition: "opacity .06s linear" }} />
                 </button>
 
                 {/* Druhý řádek: Roughness + Metalness */}
@@ -706,7 +737,21 @@ export default function ClientPage() {
                 </button>
 
                 {title && (
-                  <div title={title} style={{ maxWidth: 220, padding: "6px 10px", borderRadius: 8, border: "1px solid rgba(255,255,255,.18)", background: "rgba(255,255,255,.08)", fontSize: 13, fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                  <div
+                    title={title}
+                    style={{
+                      maxWidth: 220,
+                      padding: "6px 10px",
+                      borderRadius: 8,
+                      border: "1px solid rgba(255,255,255,.18)",
+                      background: "rgba(255,255,255,.08)",
+                      fontSize: 13,
+                      fontWeight: 600,
+                      whiteSpace: "nowrap",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                    }}
+                  >
                     {title}
                   </div>
                 )}
@@ -719,8 +764,10 @@ export default function ClientPage() {
                     onChange={(e) => setHdriKey(e.target.value)}
                     style={{
                       background: "rgba(255,255,255,.08)",
-                      color: "#fff", border: "1px solid rgba(255,255,255,.2)",
-                      borderRadius: 6, padding: "4px 8px"
+                      color: "#fff",
+                      border: "1px solid rgba(255,255,255,.2)",
+                      borderRadius: 6,
+                      padding: "4px 8px",
                     }}
                   >
                     <option value="none">Žádné</option>
@@ -749,7 +796,7 @@ export default function ClientPage() {
                 </div>
                 <div className="axis-row" style={{ display: "flex", alignItems: "center", gap: 8, margin: "4px 0" }}>
                   <span className="axis-label" aria-hidden="true" style={{ width: 18, textAlign: "right", color: "#fff", opacity: 0.9 }}>&nbsp;</span>
-                  <input className="slider" type="range" min={0} max={2} step={0.01} value={lightIntensity} onChange={(e) => setLightIntensity(parseFloat(e.target.value))} style={{ flex: "1 1 auto", width: "100%", minWidth: 140 }}/>
+                  <input className="slider" type="range" min={0} max={2} step={0.01} value={lightIntensity} onChange={(e) => setLightIntensity(parseFloat(e.target.value))} style={{ flex: "1 1 auto", width: "100%", minWidth: 140 }} />
                 </div>
                 {[
                   { label: "Light 1 Position", pos: lightPos1, setPos: setLightPos1 },
@@ -765,7 +812,16 @@ export default function ClientPage() {
                     {["x", "y", "z"].map((axis) => (
                       <div key={axis} className="axis-row" style={{ display: "flex", alignItems: "center", gap: 8, margin: "4px 0" }}>
                         <span className="axis-label" style={{ width: 18, textAlign: "right", color: "#fff", opacity: 0.9 }}>{axis.toUpperCase()}:</span>
-                        <input className="slider" type="range" min={-10} max={10} step={0.1} value={light.pos[axis]} onChange={(e) => light.setPos({ ...light.pos, [axis]: parseFloat(e.target.value) })} style={{ flex: "1 1 auto", width: "100%", minWidth: 140 }} />
+                        <input
+                          className="slider"
+                          type="range"
+                          min={-10}
+                          max={10}
+                          step={0.1}
+                          value={light.pos[axis]}
+                          onChange={(e) => light.setPos({ ...light.pos, [axis]: parseFloat(e.target.value) })}
+                          style={{ flex: "1 1 auto", width: "100%", minWidth: 140 }}
+                        />
                       </div>
                     ))}
                   </div>
@@ -783,16 +839,15 @@ export default function ClientPage() {
         gl={{ alpha: true }}
         onCreated={({ gl }) => {
           gl.setClearAlpha(0)
-  // three r154+ používá outputColorSpace, starší verze outputEncoding
-  if ("outputColorSpace" in gl) {
-    // novější three
-    gl.outputColorSpace = THREE.SRGBColorSpace
-  } else if ("outputEncoding" in gl) {
-    // starší three
-    gl.outputEncoding = THREE.sRGBEncoding
-  }
-  gl.toneMapping = THREE.ACESFilmicToneMapping
-  gl.toneMappingExposure = 1.0
+          // three r154+ => outputColorSpace; starší three => outputEncoding (číslo 3001 = původní sRGBEncoding)
+          if ("outputColorSpace" in gl) {
+            gl.outputColorSpace = THREE.SRGBColorSpace
+          } else if ("outputEncoding" in gl) {
+            // @ts-ignore – zachová kompatibilitu se starší three
+            gl.outputEncoding = 3001
+          }
+          gl.toneMapping = THREE.ACESFilmicToneMapping
+          gl.toneMappingExposure = 1.0
         }}
         style={{ position: "absolute", inset: 0, zIndex: 1, background: "transparent" }}
       >
@@ -864,4 +919,3 @@ export default function ClientPage() {
     </div>
   )
 }
-
