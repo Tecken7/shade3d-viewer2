@@ -5,10 +5,7 @@ import * as THREE from "three"
 import { Suspense, useEffect, useMemo, useRef, useState } from "react"
 import { HexColorPicker, HexColorInput } from "react-colorful"
 import { Html } from "@react-three/drei"
-import { TrackballControls } from "three/examples/jsm/controls/TrackballControls"
-import { OBJLoader } from "three/examples/jsm/loaders/OBJLoader"
-import { STLLoader } from "three/examples/jsm/loaders/STLLoader"
-import { PLYLoader } from "three/examples/jsm/loaders/PLYLoader"
+import { TrackballControls, OBJLoader, STLLoader, PLYLoader, RGBELoader } from "three-stdlib"
 
 /* ---------- Ikony + preload ---------- */
 const ICONS = {
@@ -367,37 +364,48 @@ function AutoCenterAndFrame({
   return null
 }
 
-/* ---------- Color popover (UI) ---------- */
-function ColorSwatch({ color, onChange, ariaLabel }) {
-  const [open, setOpen] = useState(false)
-  const containerRef = useRef(null)
+/* ---------- EnvLoader (HDRI prostředí) ---------- */
+function EnvLoader({ hdriUrl, envTexRef }) {
+  const { scene, gl } = useThree()
   useEffect(() => {
-    const onDocClick = (e) => { if (open && containerRef.current && !containerRef.current.contains(e.target)) setOpen(false) }
-    document.addEventListener("mousedown", onDocClick)
-    return () => document.removeEventListener("mousedown", onDocClick)
-  }, [open])
-  return (
-    <div ref={containerRef} className="swatch-wrap" style={{ position: "relative", display: "inline-block" }}>
-      <button
-        aria-label={ariaLabel || "color picker"}
-        onClick={() => setOpen((v) => !v)}
-        className="swatch-btn"
-        style={{ width: 36, height: 22, borderRadius: 4, border: "1px solid #fff", background: color, cursor: "pointer", boxShadow: "0 0 0 1px rgba(0,0,0,.25) inset" }}
-      />
-      {open && (
-        <div className="swatch-pop" style={{ position: "absolute", zIndex: 20, top: 28, left: 0, background: "rgba(0,0,0,.92)", padding: 12, borderRadius: 10, border: "1px solid rgba(255,255,255,.18)", backdropFilter: "blur(4px)", boxShadow: "0 6px 24px rgba(0,0,0,.35)" }}>
-          <HexColorPicker color={color} onChange={onChange} />
-          <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8 }}>
-            <span style={{ color: "#fff", fontSize: 12 }}>#</span>
-            <HexColorInput color={color} onChange={onChange} prefixed={false} style={{ width: 90, padding: "4px 6px", borderRadius: 6, border: "1px solid #444", background: "#111", color: "#fff", fontFamily: "monospace", fontSize: 12 }} />
-          </div>
-        </div>
-      )}
-    </div>
-  )
+    let disposed = false
+    // žádné prostředí
+    if (!hdriUrl) {
+      if (scene.environment) scene.environment.dispose?.()
+      scene.environment = null
+      return
+    }
+    const loader = new RGBELoader()
+    loader.setDataType(THREE.UnsignedByteType)
+    loader.load(hdriUrl, (hdr) => {
+      if (disposed) return
+      const pmrem = new THREE.PMREMGenerator(gl)
+      pmrem.compileEquirectangularShader()
+      const envTex = pmrem.fromEquirectangular(hdr).texture
+      hdr.dispose()
+      // uklid starého
+      if (envTexRef.current && envTexRef.current !== envTex) {
+        envTexRef.current.dispose?.()
+      }
+      envTexRef.current = envTex
+      scene.environment = envTex
+    })
+    return () => { disposed = true }
+  }, [hdriUrl, scene, gl, envTexRef])
+  return null
 }
 
 /* ---------- ClientPage (Viewer) ---------- */
+
+// HDRI presety – máš nahrané studio_small_03_1k.hdr v /public/hdr/
+const HDRI_PRESETS = {
+  none: null,
+  studioSoft: "/hdr/studio_small_03_1k.hdr",
+  // můžeš si přidat další soubory do /public/hdr a jen je sem doplnit
+  // grayRoom: "/hdr/studio_small_08_1k.hdr",
+  // overcast: "/hdr/overcast_park_1k.hdr",
+}
+
 export default function ClientPage() {
   // světla
   const [lightIntensity, setLightIntensity] = useState(1)
@@ -436,6 +444,10 @@ export default function ClientPage() {
     return isFinite(v) ? Math.max(0, Math.min(80, v)) : 30
   })
 
+  // HDRI
+  const [hdriKey, setHdriKey] = useState(getParam("env") || "studioSoft")
+  const envTexRef = useRef(null)
+
   const [logoCfg, setLogoCfg] = useState({ url: DEFAULT_LOGO, opacity: 0.9, width: 160, pos: "bc" })
 
   const [cameraTarget, setCameraTarget] = useState([0, 0, 0])
@@ -473,6 +485,10 @@ export default function ClientPage() {
           setRoughnesses(Fs.map((f) => (typeof f.r === "number" ? clamp01(f.r) : 0.5)))
           setMetalnesses(Fs.map((f) => (typeof f.m === "number" ? clamp01(f.m) : 0.5)))
           setTitle(typeof m?.title === "string" ? m.title : (getParam("title") ?? null))
+          // možnost přepsat prostředí i z manifestu (m.env) – když tam bude, použijeme ho
+          const envKey = (m?.env && HDRI_PRESETS[m.env] !== undefined) ? m.env : (getParam("env") || hdriKey)
+          setHdriKey(envKey)
+
           const logoUrl = m?.logo?.url || DEFAULT_LOGO
           setLogoCfg({
             url: logoUrl || null,
@@ -509,6 +525,10 @@ export default function ClientPage() {
           setRoughnesses(Fs.map((f) => (typeof f.r === "number" ? clamp01(f.r) : 0.5)))
           setMetalnesses(Fs.map((f) => (typeof f.m === "number" ? clamp01(f.m) : 0.5)))
           setTitle(getParam("title") ?? null)
+          // prostředí z URL (?env=) má přednost
+          const envKey = getParam("env")
+          if (envKey && HDRI_PRESETS[envKey] !== undefined) setHdriKey(envKey)
+
           setLogoCfg({
             url: getParam("logo") === "none" ? null : getParam("logo") || DEFAULT_LOGO,
             opacity: clamp01(parseFloat(getParam("logoOpacity") ?? "0.9")),
@@ -536,6 +556,7 @@ export default function ClientPage() {
         setFatal("Tento náhled není dostupný (chyba při načtení dat).")
       }
     })()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   // LOGO
@@ -668,7 +689,7 @@ export default function ClientPage() {
               </div>
             ))}
 
-            {/* Světla + Titulek + AutoSmooth */}
+            {/* Světla + Titulek + AutoSmooth + HDRI preset */}
             <div style={{ display: "grid", gridTemplateColumns: "auto 1fr", alignItems: "center", gap: 8, marginTop: 8 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                 <button
@@ -689,6 +710,25 @@ export default function ClientPage() {
                     {title}
                   </div>
                 )}
+
+                {/* HDRI preset select */}
+                <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                  <span style={{ opacity: .9 }}>Prostředí:</span>
+                  <select
+                    value={hdriKey}
+                    onChange={(e) => setHdriKey(e.target.value)}
+                    style={{
+                      background: "rgba(255,255,255,.08)",
+                      color: "#fff", border: "1px solid rgba(255,255,255,.2)",
+                      borderRadius: 6, padding: "4px 8px"
+                    }}
+                  >
+                    <option value="none">Žádné</option>
+                    <option value="studioSoft">Studio – soft</option>
+                    {/* <option value="grayRoom">Studio – gray room</option>
+                    <option value="overcast">Overcast</option> */}
+                  </select>
+                </label>
               </div>
 
               <div style={{ display: "flex", alignItems: "center", gap: 8, justifyContent: "flex-end" }}>
@@ -741,16 +781,26 @@ export default function ClientPage() {
         orthographic
         camera={{ position: [0, 0, 100], near: 0.01, far: 100000 }}
         gl={{ alpha: true }}
-        onCreated={({ gl }) => gl.setClearAlpha(0)}
+        onCreated={({ gl }) => {
+          gl.setClearAlpha(0)
+          // Color management / tone mapping
+          // (pro novější three by bylo gl.outputColorSpace = THREE.SRGBColorSpace; tohle je kompatibilní i se staršími)
+          gl.outputEncoding = THREE.sRGBEncoding
+          gl.toneMapping = THREE.ACESFilmicToneMapping
+          gl.toneMappingExposure = 1.0
+        }}
         style={{ position: "absolute", inset: 0, zIndex: 1, background: "transparent" }}
       >
+        {/* HDRI prostředí */}
+        <EnvLoader hdriUrl={HDRI_PRESETS[hdriKey]} envTexRef={envTexRef} />
+
         {!fatal && (
           <>
-            <ambientLight intensity={lightIntensity * 0.4} />
-            <directionalLight position={[lightPos1.x, lightPos1.y, lightPos1.z]} intensity={lightIntensity * 1.5} />
-            <directionalLight position={[lightPos2.x, lightPos2.y, lightPos2.z]} intensity={lightIntensity * 1.0} />
-            <directionalLight position={[lightPos3.x, lightPos3.y, lightPos3.z]} intensity={lightIntensity * 1.2} />
-            <directionalLight position={[lightPos4.x, lightPos4.y, lightPos4.z]} intensity={lightIntensity * 0.8} />
+            <ambientLight intensity={lightIntensity * 0.3} />
+            <directionalLight position={[lightPos1.x, lightPos1.y, lightPos1.z]} intensity={lightIntensity * 1.2} />
+            <directionalLight position={[lightPos2.x, lightPos2.y, lightPos2.z]} intensity={lightIntensity * 0.9} />
+            <directionalLight position={[lightPos3.x, lightPos3.y, lightPos3.z]} intensity={lightIntensity * 1.0} />
+            <directionalLight position={[lightPos4.x, lightPos4.y, lightPos4.z]} intensity={lightIntensity * 0.7} />
 
             <group ref={rootRef}>
               <Suspense fallback={null}>
