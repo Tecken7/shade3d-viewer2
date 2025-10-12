@@ -7,7 +7,7 @@ import { HexColorPicker, HexColorInput } from "react-colorful"
 import { Html } from "@react-three/drei"
 import { TrackballControls, OBJLoader, STLLoader, PLYLoader, RGBELoader } from "three-stdlib"
 
-/* -------------------------------- Icons preload -------------------------------- */
+/* ---------- Ikony + preload ---------- */
 const ICONS = {
   eye: "/icons/Eye.png",
   eyeOff: "/icons/Eye-off.png",
@@ -27,7 +27,7 @@ function PreloadIcons() {
   return null
 }
 
-/* -------------------------------- Helpers -------------------------------- */
+/* ---------- Helpers ---------- */
 const DEFAULT_LOGO = "/Arthetic_logo.png"
 const stripExt = (s) => s?.replace(/\.[^.]+$/, "") || ""
 const clamp01 = (x) => Math.max(0, Math.min(1, x))
@@ -47,7 +47,7 @@ function inferExt(nameOrUrl) {
   return m ? m[1].toLowerCase() : ""
 }
 
-/* ----------------------------- Auto Smooth (viewer-side) ----------------------------- */
+/* ---------- Auto Smooth ---------- */
 function autoSmoothGeometry(geometry, angleDeg = 30) {
   const angle = Math.max(0, Math.min(89.9, angleDeg))
   const angleRad = (angle * Math.PI) / 180
@@ -108,7 +108,7 @@ function autoSmoothGeometry(geometry, angleDeg = 30) {
   return g
 }
 
-/* -------------------------------- Inline loader -------------------------------- */
+/* ---------- Loader (overlay) ---------- */
 function InlineLoader({ text }) {
   return (
     <Html center>
@@ -119,7 +119,7 @@ function InlineLoader({ text }) {
   )
 }
 
-/* -------------------------------- Model loader -------------------------------- */
+/* ---------- AnyModel ---------- */
 function AnyModel({
   name, url,
   color, opacity, visible,
@@ -127,6 +127,7 @@ function AnyModel({
   roughness = 0.5, metalness = 0.5,
   useVertexColors = false,
   keepMaterials = false,
+  envIntensity = 0.6,
 }) {
   const [object3D, setObject3D] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -141,6 +142,7 @@ function AnyModel({
       opacity,
       side: THREE.DoubleSide,
       depthWrite: opacity === 1,
+      envMapIntensity: envIntensity,
       ...opts,
     })
 
@@ -154,7 +156,8 @@ function AnyModel({
           const geom = await new STLLoader().loadAsync(url)
           if (!geom.attributes.normal) geom.computeVertexNormals()
           const base = autoSmooth ? autoSmoothGeometry(geom, smoothAngle) : (geom.computeVertexNormals(), geom)
-          obj = new THREE.Mesh(base, makeMat())
+          const mat = makeMat()
+          obj = new THREE.Mesh(base, mat)
           obj.userData._baseGeom = geom
           obj.userData._derivedGeom = base
         } else if (ext === "ply") {
@@ -163,9 +166,11 @@ function AnyModel({
           let base = geom
           if (autoSmooth) base = autoSmoothGeometry(geom, smoothAngle)
           else if (!geom.attributes.normal) geom.computeVertexNormals()
+
           const mat = hasVC && useVertexColors
             ? makeMat({ vertexColors: true, color: new THREE.Color("#ffffff") })
             : makeMat()
+
           obj = new THREE.Mesh(base, mat)
           obj.userData._baseGeom = geom
           obj.userData._derivedGeom = base
@@ -180,6 +185,7 @@ function AnyModel({
                   if ("opacity" in mat) mat.opacity = opacity
                   if ("roughness" in mat && typeof roughness === "number") mat.roughness = roughness
                   if ("metalness" in mat && typeof metalness === "number") mat.metalness = metalness
+                  if ("envMapIntensity" in mat) mat.envMapIntensity = envIntensity
                 }
               }
             })
@@ -205,16 +211,21 @@ function AnyModel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [url, ext])
 
-  // AutoSmooth toggle/update
+  // AutoSmooth re-aplikace při změně
   useEffect(() => {
     if (!object3D) return
     object3D.traverse((child) => {
       if (!child.isMesh) return
       if (!child.userData._baseGeom) child.userData._baseGeom = child.geometry
       const base = child.userData._baseGeom
+
       let newGeom = base
       if (autoSmooth) newGeom = autoSmoothGeometry(base, smoothAngle)
-      else { newGeom = base.clone(); newGeom.computeVertexNormals() }
+      else {
+        newGeom = base.clone()
+        newGeom.computeVertexNormals()
+      }
+
       if (child.userData._derivedGeom && child.userData._derivedGeom !== base) {
         child.userData._derivedGeom.dispose()
       }
@@ -223,7 +234,7 @@ function AnyModel({
     })
   }, [object3D, autoSmooth, smoothAngle])
 
-  // Appearance
+  // Materiál a vzhled – reaguje i na envIntensity
   useEffect(() => {
     if (!object3D) return
     object3D.traverse((child) => {
@@ -240,6 +251,7 @@ function AnyModel({
             mat.vertexColors = true
             if ("color" in mat) mat.color = new THREE.Color("#ffffff")
           }
+          if ("envMapIntensity" in mat) mat.envMapIntensity = envIntensity
           mat.needsUpdate = true
         }
       } else {
@@ -250,13 +262,13 @@ function AnyModel({
         child.material = mat
       }
     })
-  }, [object3D, color, opacity, roughness, metalness, useVertexColors, keepMaterials])
+  }, [object3D, color, opacity, roughness, metalness, useVertexColors, keepMaterials, envIntensity])
 
   if (!object3D) return loading ? <InlineLoader text={`Načítám ${name || url}`} /> : null
   return visible ? <primitive object={object3D} /> : null
 }
 
-/* ----------------------------- Trackball (with ortho zoom clamp) ----------------------------- */
+/* ---------- Trackball ---------- */
 function TouchTrackballControls({ target = [0, 0, 0] }) {
   const { camera, gl } = useThree()
   const controlsRef = useRef(null)
@@ -267,15 +279,11 @@ function TouchTrackballControls({ target = [0, 0, 0] }) {
     controls.zoomSpeed = 1.2
     controls.panSpeed = 1.0
     controls.staticMoving = true
-    controls.noZoom = false
-    controls.noPan = false
     controlsRef.current = controls
-
     const ts = (e) => { e.preventDefault(); controls.handleTouchStart(e) }
     const tm = (e) => { e.preventDefault(); controls.handleTouchMove(e) }
     gl.domElement.addEventListener("touchstart", ts, { passive: false })
     gl.domElement.addEventListener("touchmove", tm, { passive: false })
-
     return () => {
       gl.domElement.removeEventListener("touchstart", ts)
       gl.domElement.removeEventListener("touchmove", tm)
@@ -290,21 +298,15 @@ function TouchTrackballControls({ target = [0, 0, 0] }) {
   }, [target])
 
   useFrame(() => {
-    const c = controlsRef.current
-    if (!c) return
-    if (camera.isOrthographicCamera) {
-      // clamp zoom so we can ALWAYS zoom back out
-      camera.zoom = Math.min(500, Math.max(0.02, camera.zoom))
-      c.panSpeed = camera.zoom * 0.4
-      camera.updateProjectionMatrix()
-    }
-    c.update()
+    if (!controlsRef.current) return
+    if (camera.isOrthographicCamera) controlsRef.current.panSpeed = camera.zoom * 0.4
+    controlsRef.current.update()
   })
 
   return null
 }
 
-/* ----------------------------- AutoCenter & AutoFrame ----------------------------- */
+/* ---------- AutoCenter & AutoFrame ---------- */
 function AutoCenterAndFrame({
   rootRef, depsKey, setTarget,
   margin = 1.2, isMobile = false, desktopScale = 0.4, mobileScale = 1.0,
@@ -357,7 +359,7 @@ function AutoCenterAndFrame({
 
     camera.near = 0.01
     camera.far = 100000
-    camera.zoom = Math.max(newZoom, 0.02)
+    camera.zoom = Math.max(newZoom, 0.01)
     camera.position.set(ctr.x, ctr.y, ctr.z + Math.abs(camera.position.z))
     camera.updateProjectionMatrix()
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -366,65 +368,42 @@ function AutoCenterAndFrame({
   return null
 }
 
-/* ----------------------------- Environment (HDRI) ----------------------------- */
-function EnvLoader({ hdriUrl, onError }) {
+/* ---------- EnvLoader (HDRI prostředí) ---------- */
+function EnvLoader({ hdriUrl, envTexRef }) {
   const { scene, gl } = useThree()
   useEffect(() => {
     let disposed = false
-    let pmrem = null
-    let rt = null
-
-    async function loadEnv() {
-      try {
-        // clean previous
-        if (scene.environment && scene.environment.dispose) {
-          scene.environment.dispose()
-        }
-        scene.environment = null
-        scene.background = null
-
-        if (!hdriUrl) return
-
-        const loader = new RGBELoader()
-        const hdr = await loader.loadAsync(hdriUrl)
-        // PMREM from equirect
-        pmrem = new THREE.PMREMGenerator(gl)
-        pmrem.compileEquirectangularShader()
-        rt = pmrem.fromEquirectangular(hdr)
-        const envTex = rt.texture
-        hdr.dispose()
-        if (disposed) {
-          envTex.dispose?.()
-          return
-        }
-        scene.environment = envTex
-        scene.background = null // necháváme průhledné
-      } catch (e) {
-        console.error("Env load error:", e)
-        onError?.(String(e?.message || e))
-      } finally {
-        // PMREM render target drží envTex, to necháme na scene.environment
-        if (pmrem) pmrem.dispose()
-        // rt NElze dispose teď, protože by zrušilo texture; necháme three uklidit s environmentem
-      }
+    if (!hdriUrl) {
+      if (scene.environment) scene.environment.dispose?.()
+      scene.environment = null
+      return
     }
-
-    loadEnv()
+    const loader = new RGBELoader()
+    loader.setDataType(THREE.UnsignedByteType)
+    loader.load(hdriUrl, (hdr) => {
+      if (disposed) return
+      const pmrem = new THREE.PMREMGenerator(gl)
+      pmrem.compileEquirectangularShader()
+      const envTex = pmrem.fromEquirectangular(hdr).texture
+      hdr.dispose()
+      if (envTexRef.current && envTexRef.current !== envTex) envTexRef.current.dispose?.()
+      envTexRef.current = envTex
+      scene.environment = envTex
+    })
     return () => { disposed = true }
-  }, [hdriUrl, scene, gl, onError])
-
+  }, [hdriUrl, scene, gl, envTexRef])
   return null
 }
 
-/* ----------------------------- HDRI presets ----------------------------- */
+/* ---------- ClientPage (Viewer) ---------- */
+
 const HDRI_PRESETS = {
   none: null,
   studioSoft: "/hdr/studio_small_03_1k.hdr",
 }
 
-/* -------------------------------- ClientPage -------------------------------- */
 export default function ClientPage() {
-  // světla
+  // světla (základ)
   const [lightIntensity, setLightIntensity] = useState(1)
   const [lightPos1, setLightPos1] = useState({ x: 0, y: 5, z: 5 })
   const [lightPos2, setLightPos2] = useState({ x: -10, y: 0, z: 0 })
@@ -446,7 +425,7 @@ export default function ClientPage() {
   const [title, setTitle] = useState(null)
 
   // modely
-  const [files, setFiles] = useState([])
+  const [files, setFiles] = useState([]) // {url,name,rawName,c,o,v,r,m,vc,km}
   const [colors, setColors] = useState([])
   const [opacities, setOpacities] = useState([])
   const [visibles, setVisibles] = useState([])
@@ -461,9 +440,11 @@ export default function ClientPage() {
     return isFinite(v) ? Math.max(0, Math.min(80, v)) : 30
   })
 
-  // HDRI
+  // HDRI a render kontrola
   const [hdriKey, setHdriKey] = useState(getParam("env") || "studioSoft")
-  const [envError, setEnvError] = useState(null)
+  const envTexRef = useRef(null)
+  const [envIntensity, setEnvIntensity] = useState(0.6)   // síla odrazů na materiálech
+  const [exposure, setExposure] = useState(0.7)           // celková expozice rendereru
 
   const [logoCfg, setLogoCfg] = useState({ url: DEFAULT_LOGO, opacity: 0.9, width: 160, pos: "bc" })
 
@@ -474,7 +455,7 @@ export default function ClientPage() {
   const centerParam = (getParam("center") || "combined").toLowerCase()
   const centerMode = ["per", "combined", "none"].includes(centerParam) ? centerParam : "combined"
 
-  // init – manifest / files
+  // init
   useEffect(() => {
     ;(async () => {
       try {
@@ -482,10 +463,16 @@ export default function ClientPage() {
         if (manifestUrl) {
           const m = await fetchJSON(manifestUrl)
           const Fs = (m?.files || []).map((x, i) => ({
-            url: x.u, name: stripExt(x.n) || `Model ${i + 1}`, rawName: x.n,
-            c: x.c, o: typeof x.o === "number" ? x.o : 1, v: typeof x.v === "boolean" ? x.v : true,
-            r: typeof x.r === "number" ? x.r : 0.5, m: typeof x.m === "number" ? x.m : 0.5,
-            vc: !!x.vc, km: !!x.km,
+            url: x.u,
+            name: stripExt(x.n) || `Model ${i + 1}`,
+            rawName: x.n,
+            c: x.c,
+            o: typeof x.o === "number" ? x.o : 1,
+            v: typeof x.v === "boolean" ? x.v : true,
+            r: typeof x.r === "number" ? x.r : 0.5,
+            m: typeof x.m === "number" ? x.m : 0.5,
+            vc: !!x.vc,
+            km: !!x.km,
           }))
           if (!Fs.length) throw new Error("Manifest je prázdný.")
           setFiles(Fs)
@@ -496,8 +483,8 @@ export default function ClientPage() {
           setRoughnesses(Fs.map((f) => (typeof f.r === "number" ? clamp01(f.r) : 0.5)))
           setMetalnesses(Fs.map((f) => (typeof f.m === "number" ? clamp01(f.m) : 0.5)))
           setTitle(typeof m?.title === "string" ? m.title : (getParam("title") ?? null))
-          const manifestEnv = m?.env
-          if (manifestEnv && HDRI_PRESETS[manifestEnv] !== undefined) setHdriKey(manifestEnv)
+          const envKey = (m?.env && HDRI_PRESETS[m.env] !== undefined) ? m.env : (getParam("env") || hdriKey)
+          setHdriKey(envKey)
 
           const logoUrl = m?.logo?.url || DEFAULT_LOGO
           setLogoCfg({
@@ -516,10 +503,16 @@ export default function ClientPage() {
           if (!arr) { try { arr = JSON.parse(decodeURIComponent(f)) } catch {} }
           if (!Array.isArray(arr)) throw new Error("Neplatný formát parametru ?files=")
           const Fs = arr.filter((x) => x && x.u).map((x, i) => ({
-            url: x.u, name: stripExt(x.n) || `Model ${i + 1}`, rawName: x.n,
-            c: x.c, o: typeof x.o === "number" ? x.o : 1, v: typeof x.v === "boolean" ? x.v : true,
-            r: typeof x.r === "number" ? x.r : 0.5, m: typeof x.m === "number" ? x.m : 0.5,
-            vc: !!x.vc, km: !!x.km,
+            url: x.u,
+            name: stripExt(x.n) || `Model ${i + 1}`,
+            rawName: x.n,
+            c: x.c,
+            o: typeof x.o === "number" ? x.o : 1,
+            v: typeof x.v === "boolean" ? x.v : true,
+            r: typeof x.r === "number" ? x.r : 0.5,
+            m: typeof x.m === "number" ? x.m : 0.5,
+            vc: !!x.vc,
+            km: !!x.km,
           }))
           setFiles(Fs)
           const palette = ["#f5f5dc", "#8e8e8e", "#ffffff", "#ffd7a8", "#c0c0c0", "#e6f0ff", "#ffeedd"]
@@ -529,8 +522,8 @@ export default function ClientPage() {
           setRoughnesses(Fs.map((f) => (typeof f.r === "number" ? clamp01(f.r) : 0.5)))
           setMetalnesses(Fs.map((f) => (typeof f.m === "number" ? clamp01(f.m) : 0.5)))
           setTitle(getParam("title") ?? null)
-          const envKey = getParam("env")
-          if (envKey && HDRI_PRESETS[envKey] !== undefined) setHdriKey(envKey)
+          const envKeyUrl = getParam("env")
+          if (envKeyUrl && HDRI_PRESETS[envKeyUrl] !== undefined) setHdriKey(envKeyUrl)
 
           setLogoCfg({
             url: getParam("logo") === "none" ? null : getParam("logo") || DEFAULT_LOGO,
@@ -562,7 +555,7 @@ export default function ClientPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // LOGO element (pod canvasem)
+  // LOGO
   const logoEl = logoCfg.url && (
     <img
       src={logoCfg.url}
@@ -590,17 +583,6 @@ export default function ClientPage() {
     <div className="stage" style={{ position: "relative", width: "100vw", height: "100vh", background: "black" }}>
       <PreloadIcons />
       {logoEl}
-
-      {/* Error toast pro env */}
-      {envError && (
-        <div style={{
-          position: "absolute", top: 8, left: 8, zIndex: 3,
-          background: "rgba(64,16,16,.95)", border: "1px solid #6f2a2a",
-          color: "#ffbcbc", padding: "8px 10px", borderRadius: 8, fontSize: 12,
-        }}>
-          Viewer error<br />{envError}
-        </div>
-      )}
 
       {/* Ovládací panel */}
       <div
@@ -640,7 +622,7 @@ export default function ClientPage() {
                   />
                 </div>
 
-                {/* Opacity */}
+                {/* Slider – Opacity */}
                 <div className="row-slider" style={{ minWidth: 0 }}>
                   <input
                     className="slider"
@@ -704,12 +686,12 @@ export default function ClientPage() {
               </div>
             ))}
 
-            {/* Světla + Titulek + AutoSmooth + HDRI preset */}
+            {/* Světla + Titulek + AutoSmooth + HDRI preset + Env/Exposure */}
             <div style={{ display: "grid", gridTemplateColumns: "auto 1fr", alignItems: "center", gap: 8, marginTop: 8 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                 <button
                   className={`toggle arrow-toggle ${showLights ? "is-open" : "is-closed"}`}
-                  onClick={() => setShowLights(!showLights)}
+                  onClick={() => setShowLights((v) => !v)}
                   aria-label="Toggle lights panel"
                   style={{ display: "inline-flex", alignItems: "center", gap: 8, padding: "6px 10px", border: "1px solid white", borderRadius: 6, background: "transparent", color: "white", cursor: "pointer" }}
                 >
@@ -731,13 +713,29 @@ export default function ClientPage() {
                   <span style={{ opacity: .9 }}>Prostředí:</span>
                   <select
                     value={hdriKey}
-                    onChange={(e) => { setEnvError(null); setHdriKey(e.target.value) }}
+                    onChange={(e) => setHdriKey(e.target.value)}
                     style={{ background: "rgba(255,255,255,.08)", color: "#fff", border: "1px solid rgba(255,255,255,.2)", borderRadius: 6, padding: "4px 8px" }}
                   >
                     <option value="none">Žádné</option>
                     <option value="studioSoft">Studio – soft</option>
                   </select>
                 </label>
+
+                {/* Síla prostředí (odlesky) */}
+                {hdriKey !== "none" && (
+                  <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                    <span style={{ opacity: .9 }}>Env</span>
+                    <input className="slider" type="range" min={0} max={2} step={0.01} value={envIntensity} onChange={(e) => setEnvIntensity(parseFloat(e.target.value))} style={{ width: 100 }} />
+                  </label>
+                )}
+
+                {/* Expozice rendereru */}
+                {hdriKey !== "none" && (
+                  <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                    <span style={{ opacity: .9 }}>Expozice</span>
+                    <input className="slider" type="range" min={0.2} max={1.2} step={0.01} value={exposure} onChange={(e) => setExposure(parseFloat(e.target.value))} style={{ width: 110 }} />
+                  </label>
+                )}
               </div>
 
               <div style={{ display: "flex", alignItems: "center", gap: 8, justifyContent: "flex-end" }}>
@@ -749,6 +747,39 @@ export default function ClientPage() {
                 <input className="slider" type="range" min={0} max={80} step={1} value={smoothAngle} onChange={(e) => setSmoothAngle(parseFloat(e.target.value))} style={{ width: 120 }} />
               </div>
             </div>
+
+            {/* Panel světel – už spolehlivě renderujeme při showLights */}
+            {showLights && (
+              <div className="lights-wrap" style={{ marginTop: 6 }}>
+                <div className="lights-row" style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+                  <img src={ICONS.bulb} alt="" width="16" height="16" style={{ width: 16, height: 16 }} />
+                  <span>Light Intensity</span>
+                </div>
+                <div className="axis-row" style={{ display: "flex", alignItems: "center", gap: 8, margin: "4px 0" }}>
+                  <span className="axis-label" aria-hidden="true" style={{ width: 18, textAlign: "right", color: "#fff", opacity: 0.9 }}>&nbsp;</span>
+                  <input className="slider" type="range" min={0} max={2} step={0.01} value={lightIntensity} onChange={(e) => setLightIntensity(parseFloat(e.target.value))} style={{ flex: "1 1 auto", width: "100%", minWidth: 140 }}/>
+                </div>
+                {[
+                  { label: "Light 1 Position", pos: lightPos1, setPos: setLightPos1 },
+                  { label: "Light 2 Position", pos: lightPos2, setPos: setLightPos2 },
+                  { label: "Light 3 Position", pos: lightPos3, setPos: setLightPos3 },
+                  { label: "Light 4 Position", pos: lightPos4, setPos: setLightPos4 },
+                ].map((light, idx) => (
+                  <div key={idx} className="light-block" style={{ marginTop: 8 }}>
+                    <div className="lights-row" style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+                      <img src={ICONS.flashlight} alt="" width="16" height="16" style={{ width: 16, height: 16 }} />
+                      <span>{light.label}</span>
+                    </div>
+                    {["x", "y", "z"].map((axis) => (
+                      <div key={axis} className="axis-row" style={{ display: "flex", alignItems: "center", gap: 8, margin: "4px 0" }}>
+                        <span className="axis-label" style={{ width: 18, textAlign: "right", color: "#fff", opacity: 0.9 }}>{axis.toUpperCase()}:</span>
+                        <input className="slider" type="range" min={-10} max={10} step={0.1} value={light.pos[axis]} onChange={(e) => light.setPos({ ...light.pos, [axis]: parseFloat(e.target.value) })} style={{ flex: "1 1 auto", width: "100%", minWidth: 140 }} />
+                      </div>
+                    ))}
+                  </div>
+                ))}
+              </div>
+            )}
           </>
         )}
       </div>
@@ -760,26 +791,28 @@ export default function ClientPage() {
         gl={{ alpha: true }}
         onCreated={({ gl }) => {
           gl.setClearAlpha(0)
-          if ("outputColorSpace" in gl) {
-            gl.outputColorSpace = THREE.SRGBColorSpace
-          } else if ("outputEncoding" in gl) {
-            gl.outputEncoding = THREE.sRGBEncoding
-          }
+          // output color (nové vs staré three)
+          if ("outputColorSpace" in gl) gl.outputColorSpace = THREE.SRGBColorSpace
+          else if ("outputEncoding" in gl) gl.outputEncoding = THREE.sRGBEncoding
           gl.toneMapping = THREE.ACESFilmicToneMapping
-          gl.toneMappingExposure = 1.0
+          gl.toneMappingExposure = exposure
         }}
         style={{ position: "absolute", inset: 0, zIndex: 1, background: "transparent" }}
       >
+        {/* Aktualizace expozice, když se hýbe slider */}
+        <ExposureApplier exposure={exposure} />
+
         {/* HDRI prostředí */}
-        <EnvLoader hdriUrl={HDRI_PRESETS[hdriKey]} onError={setEnvError} />
+        <EnvLoader hdriUrl={HDRI_PRESETS[hdriKey]} envTexRef={envTexRef} />
 
         {!fatal && (
           <>
-            <ambientLight intensity={lightIntensity * 0.3} />
-            <directionalLight position={[lightPos1.x, lightPos1.y, lightPos1.z]} intensity={lightIntensity * 1.2} />
-            <directionalLight position={[lightPos2.x, lightPos2.y, lightPos2.z]} intensity={lightIntensity * 0.9} />
-            <directionalLight position={[lightPos3.x, lightPos3.y, lightPos3.z]} intensity={lightIntensity * 1.0} />
-            <directionalLight position={[lightPos4.x, lightPos4.y, lightPos4.z]} intensity={lightIntensity * 0.7} />
+            {/* Když je HDRI zapnuté, trochu stáhneme direkční světla */}
+            <ambientLight intensity={lightIntensity * (hdriKey !== "none" ? 0.25 : 0.4)} />
+            <directionalLight position={[lightPos1.x, lightPos1.y, lightPos1.z]} intensity={lightIntensity * (hdriKey !== "none" ? 0.9 : 1.5)} />
+            <directionalLight position={[lightPos2.x, lightPos2.y, lightPos2.z]} intensity={lightIntensity * (hdriKey !== "none" ? 0.6 : 1.0)} />
+            <directionalLight position={[lightPos3.x, lightPos3.y, lightPos3.z]} intensity={lightIntensity * (hdriKey !== "none" ? 0.7 : 1.2)} />
+            <directionalLight position={[lightPos4.x, lightPos4.y, lightPos4.z]} intensity={lightIntensity * (hdriKey !== "none" ? 0.5 : 0.8)} />
 
             <group ref={rootRef}>
               <Suspense fallback={null}>
@@ -798,6 +831,7 @@ export default function ClientPage() {
                     metalness={metalnesses[i] ?? (typeof f.m === "number" ? f.m : 0.5)}
                     useVertexColors={!!f.vc}
                     keepMaterials={!!f.km}
+                    envIntensity={envIntensity}
                   />
                 ))}
               </Suspense>
@@ -839,7 +873,16 @@ export default function ClientPage() {
   )
 }
 
-/* ----------------------------- ColorSwatch ----------------------------- */
+/** Renderer exposure live update inside <Canvas> */
+function ExposureApplier({ exposure }) {
+  const { gl } = useThree()
+  useEffect(() => {
+    gl.toneMappingExposure = exposure
+  }, [gl, exposure])
+  return null
+}
+
+/* ---------- ColorSwatch ---------- */
 function ColorSwatch({ color, onChange, ariaLabel }) {
   const [open, setOpen] = useState(false)
   const containerRef = useRef(null)
@@ -854,34 +897,14 @@ function ColorSwatch({ color, onChange, ariaLabel }) {
         aria-label={ariaLabel || "color picker"}
         onClick={() => setOpen((v) => !v)}
         className="swatch-btn"
-        style={{
-          width: 36, height: 22, borderRadius: 4, border: "1px solid #fff",
-          background: color, cursor: "pointer", boxShadow: "0 0 0 1px rgba(0,0,0,.25) inset",
-        }}
+        style={{ width: 36, height: 22, borderRadius: 4, border: "1px solid #fff", background: color, cursor: "pointer", boxShadow: "0 0 0 1px rgba(0,0,0,.25) inset" }}
       />
       {open && (
-        <div
-          className="swatch-pop"
-          style={{
-            position: "absolute", zIndex: 20, top: 28, left: 0,
-            background: "rgba(0,0,0,.92)", padding: 12, borderRadius: 10,
-            border: "1px solid rgba(255,255,255,.18)", backdropFilter: "blur(4px)",
-            boxShadow: "0 6px 24px rgba(0,0,0,.35)",
-          }}
-        >
+        <div className="swatch-pop" style={{ position: "absolute", zIndex: 20, top: 28, left: 0, background: "rgba(0,0,0,.92)", padding: 12, borderRadius: 10, border: "1px solid rgba(255,255,255,.18)", backdropFilter: "blur(4px)", boxShadow: "0 6px 24px rgba(0,0,0,.35)" }}>
           <HexColorPicker color={color} onChange={onChange} />
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8 }}>
             <span style={{ color: "#fff", fontSize: 12 }}>#</span>
-            <HexColorInput
-              color={color}
-              onChange={onChange}
-              prefixed={false}
-              style={{
-                width: 90, padding: "4px 6px", borderRadius: 6,
-                border: "1px solid #444", background: "#111", color: "#fff",
-                fontFamily: "monospace", fontSize: 12,
-              }}
-            />
+            <HexColorInput color={color} onChange={onChange} prefixed={false} style={{ width: 90, padding: "4px 6px", borderRadius: 6, border: "1px solid #444", background: "#111", color: "#fff", fontFamily: "monospace", fontSize: 12 }} />
           </div>
         </div>
       )}
