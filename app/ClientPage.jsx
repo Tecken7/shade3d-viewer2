@@ -5,7 +5,10 @@ import * as THREE from "three"
 import { Suspense, useEffect, useMemo, useRef, useState } from "react"
 import { HexColorPicker, HexColorInput } from "react-colorful"
 import { Html } from "@react-three/drei"
-import { TrackballControls, OBJLoader, STLLoader, PLYLoader, RGBELoader } from "three-stdlib"
+import { TrackballControls } from "three/examples/jsm/controls/TrackballControls"
+import { OBJLoader } from "three/examples/jsm/loaders/OBJLoader"
+import { STLLoader } from "three/examples/jsm/loaders/STLLoader"
+import { PLYLoader } from "three/examples/jsm/loaders/PLYLoader"
 
 /* ---------- Ikony + preload ---------- */
 const ICONS = {
@@ -127,7 +130,6 @@ function AnyModel({
   roughness = 0.5, metalness = 0.5,
   useVertexColors = false,
   keepMaterials = false,
-  envIntensity = 0.6,
 }) {
   const [object3D, setObject3D] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -142,7 +144,6 @@ function AnyModel({
       opacity,
       side: THREE.DoubleSide,
       depthWrite: opacity === 1,
-      envMapIntensity: envIntensity,
       ...opts,
     })
 
@@ -185,7 +186,6 @@ function AnyModel({
                   if ("opacity" in mat) mat.opacity = opacity
                   if ("roughness" in mat && typeof roughness === "number") mat.roughness = roughness
                   if ("metalness" in mat && typeof metalness === "number") mat.metalness = metalness
-                  if ("envMapIntensity" in mat) mat.envMapIntensity = envIntensity
                 }
               }
             })
@@ -234,7 +234,7 @@ function AnyModel({
     })
   }, [object3D, autoSmooth, smoothAngle])
 
-  // Materiál a vzhled – reaguje i na envIntensity
+  // Materiál a vzhled – respektuje VC/keepMaterials
   useEffect(() => {
     if (!object3D) return
     object3D.traverse((child) => {
@@ -251,7 +251,6 @@ function AnyModel({
             mat.vertexColors = true
             if ("color" in mat) mat.color = new THREE.Color("#ffffff")
           }
-          if ("envMapIntensity" in mat) mat.envMapIntensity = envIntensity
           mat.needsUpdate = true
         }
       } else {
@@ -262,7 +261,7 @@ function AnyModel({
         child.material = mat
       }
     })
-  }, [object3D, color, opacity, roughness, metalness, useVertexColors, keepMaterials, envIntensity])
+  }, [object3D, color, opacity, roughness, metalness, useVertexColors, keepMaterials])
 
   if (!object3D) return loading ? <InlineLoader text={`Načítám ${name || url}`} /> : null
   return visible ? <primitive object={object3D} /> : null
@@ -368,42 +367,39 @@ function AutoCenterAndFrame({
   return null
 }
 
-/* ---------- EnvLoader (HDRI prostředí) ---------- */
-function EnvLoader({ hdriUrl, envTexRef }) {
-  const { scene, gl } = useThree()
+/* ---------- Color popover (UI) ---------- */
+function ColorSwatch({ color, onChange, ariaLabel }) {
+  const [open, setOpen] = useState(false)
+  const containerRef = useRef(null)
   useEffect(() => {
-    let disposed = false
-    if (!hdriUrl) {
-      if (scene.environment) scene.environment.dispose?.()
-      scene.environment = null
-      return
-    }
-    const loader = new RGBELoader()
-    loader.setDataType(THREE.UnsignedByteType)
-    loader.load(hdriUrl, (hdr) => {
-      if (disposed) return
-      const pmrem = new THREE.PMREMGenerator(gl)
-      pmrem.compileEquirectangularShader()
-      const envTex = pmrem.fromEquirectangular(hdr).texture
-      hdr.dispose()
-      if (envTexRef.current && envTexRef.current !== envTex) envTexRef.current.dispose?.()
-      envTexRef.current = envTex
-      scene.environment = envTex
-    })
-    return () => { disposed = true }
-  }, [hdriUrl, scene, gl, envTexRef])
-  return null
+    const onDocClick = (e) => { if (open && containerRef.current && !containerRef.current.contains(e.target)) setOpen(false) }
+    document.addEventListener("mousedown", onDocClick)
+    return () => document.removeEventListener("mousedown", onDocClick)
+  }, [open])
+  return (
+    <div ref={containerRef} className="swatch-wrap" style={{ position: "relative", display: "inline-block" }}>
+      <button
+        aria-label={ariaLabel || "color picker"}
+        onClick={() => setOpen((v) => !v)}
+        className="swatch-btn"
+        style={{ width: 36, height: 22, borderRadius: 4, border: "1px solid #fff", background: color, cursor: "pointer", boxShadow: "0 0 0 1px rgba(0,0,0,.25) inset" }}
+      />
+      {open && (
+        <div className="swatch-pop" style={{ position: "absolute", zIndex: 20, top: 28, left: 0, background: "rgba(0,0,0,.92)", padding: 12, borderRadius: 10, border: "1px solid rgba(255,255,255,.18)", backdropFilter: "blur(4px)", boxShadow: "0 6px 24px rgba(0,0,0,.35)" }}>
+          <HexColorPicker color={color} onChange={onChange} />
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8 }}>
+            <span style={{ color: "#fff", fontSize: 12 }}>#</span>
+            <HexColorInput color={color} onChange={onChange} prefixed={false} style={{ width: 90, padding: "4px 6px", borderRadius: 6, border: "1px solid #444", background: "#111", color: "#fff", fontFamily: "monospace", fontSize: 12 }} />
+          </div>
+        </div>
+      )}
+    </div>
+  )
 }
 
 /* ---------- ClientPage (Viewer) ---------- */
-
-const HDRI_PRESETS = {
-  none: null,
-  studioSoft: "/hdr/studio_small_03_1k.hdr",
-}
-
 export default function ClientPage() {
-  // světla (základ)
+  // světla
   const [lightIntensity, setLightIntensity] = useState(1)
   const [lightPos1, setLightPos1] = useState({ x: 0, y: 5, z: 5 })
   const [lightPos2, setLightPos2] = useState({ x: -10, y: 0, z: 0 })
@@ -439,12 +435,6 @@ export default function ClientPage() {
     const v = parseFloat(getParam("smoothAngle") ?? "30")
     return isFinite(v) ? Math.max(0, Math.min(80, v)) : 30
   })
-
-  // HDRI a render kontrola
-  const [hdriKey, setHdriKey] = useState(getParam("env") || "studioSoft")
-  const envTexRef = useRef(null)
-  const [envIntensity, setEnvIntensity] = useState(0.6)   // síla odrazů na materiálech
-  const [exposure, setExposure] = useState(0.7)           // celková expozice rendereru
 
   const [logoCfg, setLogoCfg] = useState({ url: DEFAULT_LOGO, opacity: 0.9, width: 160, pos: "bc" })
 
@@ -483,9 +473,6 @@ export default function ClientPage() {
           setRoughnesses(Fs.map((f) => (typeof f.r === "number" ? clamp01(f.r) : 0.5)))
           setMetalnesses(Fs.map((f) => (typeof f.m === "number" ? clamp01(f.m) : 0.5)))
           setTitle(typeof m?.title === "string" ? m.title : (getParam("title") ?? null))
-          const envKey = (m?.env && HDRI_PRESETS[m.env] !== undefined) ? m.env : (getParam("env") || hdriKey)
-          setHdriKey(envKey)
-
           const logoUrl = m?.logo?.url || DEFAULT_LOGO
           setLogoCfg({
             url: logoUrl || null,
@@ -522,9 +509,6 @@ export default function ClientPage() {
           setRoughnesses(Fs.map((f) => (typeof f.r === "number" ? clamp01(f.r) : 0.5)))
           setMetalnesses(Fs.map((f) => (typeof f.m === "number" ? clamp01(f.m) : 0.5)))
           setTitle(getParam("title") ?? null)
-          const envKeyUrl = getParam("env")
-          if (envKeyUrl && HDRI_PRESETS[envKeyUrl] !== undefined) setHdriKey(envKeyUrl)
-
           setLogoCfg({
             url: getParam("logo") === "none" ? null : getParam("logo") || DEFAULT_LOGO,
             opacity: clamp01(parseFloat(getParam("logoOpacity") ?? "0.9")),
@@ -552,7 +536,6 @@ export default function ClientPage() {
         setFatal("Tento náhled není dostupný (chyba při načtení dat).")
       }
     })()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   // LOGO
@@ -596,7 +579,6 @@ export default function ClientPage() {
           border: "1px solid rgba(255,255,255,.15)", borderRadius: 8,
           padding: "8px 10px", width: "clamp(240px, 30vw, 420px)",
           maxWidth: "calc(100vw - 20px)", boxSizing: "border-box",
-          pointerEvents: "auto",
         }}
       >
         {fatal ? (
@@ -686,12 +668,12 @@ export default function ClientPage() {
               </div>
             ))}
 
-            {/* Světla + Titulek + AutoSmooth + HDRI preset + Env/Exposure */}
+            {/* Světla + Titulek + AutoSmooth */}
             <div style={{ display: "grid", gridTemplateColumns: "auto 1fr", alignItems: "center", gap: 8, marginTop: 8 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                 <button
                   className={`toggle arrow-toggle ${showLights ? "is-open" : "is-closed"}`}
-                  onClick={() => setShowLights((v) => !v)}
+                  onClick={() => setShowLights(!showLights)}
                   aria-label="Toggle lights panel"
                   style={{ display: "inline-flex", alignItems: "center", gap: 8, padding: "6px 10px", border: "1px solid white", borderRadius: 6, background: "transparent", color: "white", cursor: "pointer" }}
                 >
@@ -707,35 +689,6 @@ export default function ClientPage() {
                     {title}
                   </div>
                 )}
-
-                {/* HDRI preset select */}
-                <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-                  <span style={{ opacity: .9 }}>Prostředí:</span>
-                  <select
-                    value={hdriKey}
-                    onChange={(e) => setHdriKey(e.target.value)}
-                    style={{ background: "rgba(255,255,255,.08)", color: "#fff", border: "1px solid rgba(255,255,255,.2)", borderRadius: 6, padding: "4px 8px" }}
-                  >
-                    <option value="none">Žádné</option>
-                    <option value="studioSoft">Studio – soft</option>
-                  </select>
-                </label>
-
-                {/* Síla prostředí (odlesky) */}
-                {hdriKey !== "none" && (
-                  <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-                    <span style={{ opacity: .9 }}>Env</span>
-                    <input className="slider" type="range" min={0} max={2} step={0.01} value={envIntensity} onChange={(e) => setEnvIntensity(parseFloat(e.target.value))} style={{ width: 100 }} />
-                  </label>
-                )}
-
-                {/* Expozice rendereru */}
-                {hdriKey !== "none" && (
-                  <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-                    <span style={{ opacity: .9 }}>Expozice</span>
-                    <input className="slider" type="range" min={0.2} max={1.2} step={0.01} value={exposure} onChange={(e) => setExposure(parseFloat(e.target.value))} style={{ width: 110 }} />
-                  </label>
-                )}
               </div>
 
               <div style={{ display: "flex", alignItems: "center", gap: 8, justifyContent: "flex-end" }}>
@@ -748,7 +701,6 @@ export default function ClientPage() {
               </div>
             </div>
 
-            {/* Panel světel – už spolehlivě renderujeme při showLights */}
             {showLights && (
               <div className="lights-wrap" style={{ marginTop: 6 }}>
                 <div className="lights-row" style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
@@ -789,30 +741,16 @@ export default function ClientPage() {
         orthographic
         camera={{ position: [0, 0, 100], near: 0.01, far: 100000 }}
         gl={{ alpha: true }}
-        onCreated={({ gl }) => {
-          gl.setClearAlpha(0)
-          // output color (nové vs staré three)
-          if ("outputColorSpace" in gl) gl.outputColorSpace = THREE.SRGBColorSpace
-          else if ("outputEncoding" in gl) gl.outputEncoding = THREE.sRGBEncoding
-          gl.toneMapping = THREE.ACESFilmicToneMapping
-          gl.toneMappingExposure = exposure
-        }}
+        onCreated={({ gl }) => gl.setClearAlpha(0)}
         style={{ position: "absolute", inset: 0, zIndex: 1, background: "transparent" }}
       >
-        {/* Aktualizace expozice, když se hýbe slider */}
-        <ExposureApplier exposure={exposure} />
-
-        {/* HDRI prostředí */}
-        <EnvLoader hdriUrl={HDRI_PRESETS[hdriKey]} envTexRef={envTexRef} />
-
         {!fatal && (
           <>
-            {/* Když je HDRI zapnuté, trochu stáhneme direkční světla */}
-            <ambientLight intensity={lightIntensity * (hdriKey !== "none" ? 0.25 : 0.4)} />
-            <directionalLight position={[lightPos1.x, lightPos1.y, lightPos1.z]} intensity={lightIntensity * (hdriKey !== "none" ? 0.9 : 1.5)} />
-            <directionalLight position={[lightPos2.x, lightPos2.y, lightPos2.z]} intensity={lightIntensity * (hdriKey !== "none" ? 0.6 : 1.0)} />
-            <directionalLight position={[lightPos3.x, lightPos3.y, lightPos3.z]} intensity={lightIntensity * (hdriKey !== "none" ? 0.7 : 1.2)} />
-            <directionalLight position={[lightPos4.x, lightPos4.y, lightPos4.z]} intensity={lightIntensity * (hdriKey !== "none" ? 0.5 : 0.8)} />
+            <ambientLight intensity={lightIntensity * 0.4} />
+            <directionalLight position={[lightPos1.x, lightPos1.y, lightPos1.z]} intensity={lightIntensity * 1.5} />
+            <directionalLight position={[lightPos2.x, lightPos2.y, lightPos2.z]} intensity={lightIntensity * 1.0} />
+            <directionalLight position={[lightPos3.x, lightPos3.y, lightPos3.z]} intensity={lightIntensity * 1.2} />
+            <directionalLight position={[lightPos4.x, lightPos4.y, lightPos4.z]} intensity={lightIntensity * 0.8} />
 
             <group ref={rootRef}>
               <Suspense fallback={null}>
@@ -831,7 +769,6 @@ export default function ClientPage() {
                     metalness={metalnesses[i] ?? (typeof f.m === "number" ? f.m : 0.5)}
                     useVertexColors={!!f.vc}
                     keepMaterials={!!f.km}
-                    envIntensity={envIntensity}
                   />
                 ))}
               </Suspense>
@@ -869,45 +806,6 @@ export default function ClientPage() {
           }
         }
       `}</style>
-    </div>
-  )
-}
-
-/** Renderer exposure live update inside <Canvas> */
-function ExposureApplier({ exposure }) {
-  const { gl } = useThree()
-  useEffect(() => {
-    gl.toneMappingExposure = exposure
-  }, [gl, exposure])
-  return null
-}
-
-/* ---------- ColorSwatch ---------- */
-function ColorSwatch({ color, onChange, ariaLabel }) {
-  const [open, setOpen] = useState(false)
-  const containerRef = useRef(null)
-  useEffect(() => {
-    const onDocClick = (e) => { if (open && containerRef.current && !containerRef.current.contains(e.target)) setOpen(false) }
-    document.addEventListener("mousedown", onDocClick)
-    return () => document.removeEventListener("mousedown", onDocClick)
-  }, [open])
-  return (
-    <div ref={containerRef} className="swatch-wrap" style={{ position: "relative", display: "inline-block" }}>
-      <button
-        aria-label={ariaLabel || "color picker"}
-        onClick={() => setOpen((v) => !v)}
-        className="swatch-btn"
-        style={{ width: 36, height: 22, borderRadius: 4, border: "1px solid #fff", background: color, cursor: "pointer", boxShadow: "0 0 0 1px rgba(0,0,0,.25) inset" }}
-      />
-      {open && (
-        <div className="swatch-pop" style={{ position: "absolute", zIndex: 20, top: 28, left: 0, background: "rgba(0,0,0,.92)", padding: 12, borderRadius: 10, border: "1px solid rgba(255,255,255,.18)", backdropFilter: "blur(4px)", boxShadow: "0 6px 24px rgba(0,0,0,.35)" }}>
-          <HexColorPicker color={color} onChange={onChange} />
-          <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8 }}>
-            <span style={{ color: "#fff", fontSize: 12 }}>#</span>
-            <HexColorInput color={color} onChange={onChange} prefixed={false} style={{ width: 90, padding: "4px 6px", borderRadius: 6, border: "1px solid #444", background: "#111", color: "#fff", fontFamily: "monospace", fontSize: 12 }} />
-          </div>
-        </div>
-      )}
     </div>
   )
 }
