@@ -7,6 +7,45 @@ import { HexColorPicker, HexColorInput } from "react-colorful"
 import { Html } from "@react-three/drei"
 import { TrackballControls, OBJLoader, STLLoader, PLYLoader, RGBELoader } from "three-stdlib"
 
+/* ---------------- Error boundary ---------------- */
+function ErrorBoundary({ children }) {
+  const [err, setErr] = useState(null)
+  if (err) {
+    return (
+      <div style={{
+        position: "absolute", inset: 0, background: "black", color: "#fff",
+        fontFamily: "sans-serif"
+      }}>
+        <div style={{
+          position: "absolute", top: 10, left: 10,
+          background: "rgba(145,44,44,.25)", border: "1px solid #a55",
+          borderRadius: 8, padding: "10px 12px", maxWidth: 520
+        }}>
+          <div style={{ fontWeight: 700, marginBottom: 6 }}>Viewer error</div>
+          <div style={{ whiteSpace: "pre-wrap" }}>{String(err)}</div>
+        </div>
+      </div>
+    )
+  }
+  return (
+    <ErrorCatcher onError={setErr}>
+      {children}
+    </ErrorCatcher>
+  )
+}
+function ErrorCatcher({ onError, children }) {
+  useEffect(() => {
+    const h = (e) => { onError?.(e?.reason ?? e?.error ?? e?.message ?? "Unknown error") }
+    window.addEventListener("error", h)
+    window.addEventListener("unhandledrejection", h)
+    return () => {
+      window.removeEventListener("error", h)
+      window.removeEventListener("unhandledrejection", h)
+    }
+  }, [onError])
+  return children
+}
+
 /* ---------- Ikony + preload ---------- */
 const ICONS = {
   eye: "/icons/Eye.png",
@@ -18,11 +57,7 @@ const ICONS = {
 }
 function PreloadIcons() {
   useEffect(() => {
-    Object.values(ICONS).forEach((src) => {
-      const img = new Image()
-      img.decoding = "async"
-      img.src = src
-    })
+    Object.values(ICONS).forEach((src) => { const img = new Image(); img.decoding = "async"; img.src = src })
   }, [])
   return null
 }
@@ -37,7 +72,7 @@ const getParam = (name) => {
 }
 async function fetchJSON(url) {
   const r = await fetch(url, { cache: "no-store" })
-  if (!r.ok) throw new Error(`HTTP ${r.status}`)
+  if (!r.ok) throw new Error(`HTTP ${r.status} – ${url}`)
   return r.json()
 }
 function inferExt(nameOrUrl) {
@@ -47,45 +82,10 @@ function inferExt(nameOrUrl) {
   return m ? m[1].toLowerCase() : ""
 }
 
-/* ---------- Runtime “airbag” (zobrazí detail chyby) ---------- */
-function GlobalErrorCatcher() {
-  const [err, setErr] = useState(null)
-  useEffect(() => {
-    const onErr = (e) => {
-      const msg = e?.reason?.message || e?.message || String(e?.reason || e)
-      console.error("Runtime error:", e)
-      setErr(msg || "Unknown runtime error")
-    }
-    window.addEventListener("error", onErr)
-    window.addEventListener("unhandledrejection", onErr)
-    return () => {
-      window.removeEventListener("error", onErr)
-      window.removeEventListener("unhandledrejection", onErr)
-    }
-  }, [])
-  if (!err) return null
-  return (
-    <div style={{
-      position:"fixed", top:10, right:10, zIndex:9999,
-      background:"rgba(180,0,0,.9)", color:"#fff",
-      padding:"10px 12px", borderRadius:8, maxWidth:480,
-      border:"1px solid rgba(255,255,255,.25)", fontFamily:"monospace",
-      boxShadow:"0 6px 18px rgba(0,0,0,.4)"
-    }}>
-      <div style={{fontWeight:700, marginBottom:6}}>Client error</div>
-      <div style={{whiteSpace:"pre-wrap"}}>{err}</div>
-      <div style={{opacity:.8, marginTop:6, fontSize:12}}>
-        (zkontroluj taky Network panel pro 404/CORS u manifestu, modelů, HDRI)
-      </div>
-    </div>
-  )
-}
-
 /* ---------- Auto Smooth ---------- */
 function autoSmoothGeometry(geometry, angleDeg = 30) {
   const angle = Math.max(0, Math.min(89.9, angleDeg))
   const angleRad = (angle * Math.PI) / 180
-
   const g = geometry.index ? geometry.toNonIndexed() : geometry.clone()
   const pos = g.getAttribute("position")
   const vCount = pos.count
@@ -106,8 +106,7 @@ function autoSmoothGeometry(geometry, angleDeg = 30) {
   }
 
   const groups = new Map()
-  const keyOf = (ix) =>
-    `${pos.getX(ix).toFixed(5)},${pos.getY(ix).toFixed(5)},${pos.getZ(ix).toFixed(5)}`
+  const keyOf = (ix) => `${pos.getX(ix).toFixed(5)},${pos.getY(ix).toFixed(5)},${pos.getZ(ix).toFixed(5)}`
   for (let i = 0; i < vCount; i++) {
     const k = keyOf(i)
     let arr = groups.get(k)
@@ -199,11 +198,9 @@ function AnyModel({
           let base = geom
           if (autoSmooth) base = autoSmoothGeometry(geom, smoothAngle)
           else if (!geom.attributes.normal) geom.computeVertexNormals()
-
           const mat = hasVC && useVertexColors
             ? makeMat({ vertexColors: true, color: new THREE.Color("#ffffff") })
             : makeMat()
-
           obj = new THREE.Mesh(base, mat)
           obj.userData._baseGeom = geom
           obj.userData._derivedGeom = base
@@ -240,7 +237,8 @@ function AnyModel({
       }
     })()
     return () => { cancelled = true }
-  }, [url, ext]) // eslint-disable-line react-hooks/exhaustive-deps
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [url, ext])
 
   useEffect(() => {
     if (!object3D) return
@@ -248,17 +246,10 @@ function AnyModel({
       if (!child.isMesh) return
       if (!child.userData._baseGeom) child.userData._baseGeom = child.geometry
       const base = child.userData._baseGeom
-
       let newGeom = base
       if (autoSmooth) newGeom = autoSmoothGeometry(base, smoothAngle)
-      else {
-        newGeom = base.clone()
-        newGeom.computeVertexNormals()
-      }
-
-      if (child.userData._derivedGeom && child.userData._derivedGeom !== base) {
-        child.userData._derivedGeom.dispose()
-      }
+      else { newGeom = base.clone(); newGeom.computeVertexNormals() }
+      if (child.userData._derivedGeom && child.userData._derivedGeom !== base) child.userData._derivedGeom.dispose()
       child.geometry = newGeom
       child.userData._derivedGeom = newGeom
     })
@@ -276,10 +267,7 @@ function AnyModel({
           if ("roughness" in mat && typeof roughness === "number") mat.roughness = roughness
           if ("metalness" in mat && typeof metalness === "number") mat.metalness = metalness
           if (!useVertexColors && "color" in mat && color) mat.color = new THREE.Color(color)
-          if (useVertexColors && "vertexColors" in mat) {
-            mat.vertexColors = true
-            if ("color" in mat) mat.color = new THREE.Color("#ffffff")
-          }
+          if (useVertexColors && "vertexColors" in mat) { mat.vertexColors = true; if ("color" in mat) mat.color = new THREE.Color("#ffffff") }
           mat.needsUpdate = true
         }
       } else {
@@ -390,7 +378,7 @@ function AutoCenterAndFrame({
     camera.zoom = Math.max(newZoom, 0.01)
     camera.position.set(ctr.x, ctr.y, ctr.z + Math.abs(camera.position.z))
     camera.updateProjectionMatrix()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [depsKey, size.width, size.height, isMobile, desktopScale, mobileScale, margin, centerMode])
 
   return null
@@ -401,67 +389,50 @@ function EnvLoader({ hdriUrl, envTexRef, onError }) {
   const { scene, gl } = useThree()
   useEffect(() => {
     let disposed = false
+    let pmrem = null
 
-    if (!hdriUrl) {
-      try { scene.environment?.dispose?.() } catch {}
-      scene.environment = null
-      return
-    }
-
-    try {
-      const loader = new RGBELoader()
-      loader.setDataType(THREE.HalfFloatType)
-
-      const pmrem = new THREE.PMREMGenerator(gl)
-      pmrem.compileEquirectangularShader()
-
-      loader.load(
-        hdriUrl,
-        (hdr) => {
-          if (disposed) { hdr?.dispose?.(); return }
-          let envTex = null
-          try {
-            envTex = pmrem.fromEquirectangular(hdr).texture
-          } catch (e) {
-            onError?.(e)
-          } finally {
-            hdr?.dispose?.()
-            pmrem.dispose()
-          }
-          if (!envTex) return
-
-          try { envTexRef.current?.dispose?.() } catch {}
-          envTexRef.current = envTex
-          scene.environment = envTex
-        },
-        undefined,
-        (err) => {
-          pmrem.dispose()
-          onError?.(err)
-          try { scene.environment?.dispose?.() } catch {}
+    async function load() {
+      try {
+        if (!hdriUrl) {
+          if (scene.environment) scene.environment.dispose?.()
           scene.environment = null
+          return
         }
-      )
-
-      return () => { disposed = true; pmrem.dispose() }
-    } catch (e) {
-      onError?.(e)
-      try { scene.environment?.dispose?.() } catch {}
-      scene.environment = null
+        const loader = new RGBELoader()
+        loader.setDataType(THREE.UnsignedByteType)
+        const hdr = await loader.loadAsync(hdriUrl)
+        if (disposed) { hdr?.dispose?.(); return }
+        pmrem = new THREE.PMREMGenerator(gl)
+        pmrem.compileEquirectangularShader()
+        const envTex = pmrem.fromEquirectangular(hdr).texture
+        hdr.dispose()
+        if (envTexRef.current && envTexRef.current !== envTex) envTexRef.current.dispose?.()
+        envTexRef.current = envTex
+        scene.environment = envTex
+      } catch (e) {
+        console.error("HDRI load error:", e)
+        onError?.("HDRI load error: " + (e?.message || e))
+        // fallback – žádné prostředí
+        scene.environment = null
+      } finally {
+        pmrem?.dispose?.()
+      }
     }
+
+    load()
+    return () => { disposed = true }
   }, [hdriUrl, scene, gl, envTexRef, onError])
   return null
 }
 
-/* ---------- ClientPage (Viewer) ---------- */
-
+/* ---------- HDRI presets ---------- */
 const HDRI_PRESETS = {
   none: null,
   studioSoft: "/hdr/studio_small_03_1k.hdr",
 }
 
+/* -------------------- ClientPage (Viewer) -------------------- */
 export default function ClientPage() {
-  // světla
   const [lightIntensity, setLightIntensity] = useState(1)
   const [lightPos1, setLightPos1] = useState({ x: 0, y: 5, z: 5 })
   const [lightPos2, setLightPos2] = useState({ x: -10, y: 0, z: 0 })
@@ -482,7 +453,6 @@ export default function ClientPage() {
 
   const [title, setTitle] = useState(null)
 
-  // modely
   const [files, setFiles] = useState([])
   const [colors, setColors] = useState([])
   const [opacities, setOpacities] = useState([])
@@ -490,17 +460,18 @@ export default function ClientPage() {
   const [roughnesses, setRoughnesses] = useState([])
   const [metalnesses, setMetalnesses] = useState([])
   const [fatal, setFatal] = useState(null)
-  const [envError, setEnvError] = useState(null)
 
-  // auto smooth
   const [autoSmooth, setAutoSmooth] = useState((getParam("smooth") ?? "1") !== "0")
   const [smoothAngle, setSmoothAngle] = useState(() => {
     const v = parseFloat(getParam("smoothAngle") ?? "30")
     return isFinite(v) ? Math.max(0, Math.min(80, v)) : 30
   })
 
-  // HDRI – výchozí vypnuto
-  const [hdriKey, setHdriKey] = useState(getParam("env") || "none")
+  // start raději bez HDRI – pokud je v URL ?env, použije se; jinak později lze přepnout v UI
+  const [hdriKey, setHdriKey] = useState(() => {
+    const k = getParam("env")
+    return HDRI_PRESETS[k] !== undefined ? k : "none"
+  })
   const envTexRef = useRef(null)
 
   const [logoCfg, setLogoCfg] = useState({ url: DEFAULT_LOGO, opacity: 0.9, width: 160, pos: "bc" })
@@ -512,7 +483,6 @@ export default function ClientPage() {
   const centerParam = (getParam("center") || "combined").toLowerCase()
   const centerMode = ["per", "combined", "none"].includes(centerParam) ? centerParam : "combined"
 
-  // init
   useEffect(() => {
     ;(async () => {
       try {
@@ -529,21 +499,20 @@ export default function ClientPage() {
           }))
           if (!Fs.length) throw new Error("Manifest je prázdný.")
           setFiles(Fs)
-          const palette = ["#f5f5dc","#8e8e8e","#ffffff","#ffd7a8","#c0c0c0","#e6f0ff","#ffeedd"]
-          setColors(Fs.map((f,i)=> f.c || palette[i%palette.length]))
-          setOpacities(Fs.map((f)=> typeof f.o==="number" ? clamp01(f.o) : 1))
-          setVisibles(Fs.map((f)=> typeof f.v==="boolean" ? f.v : true))
-          setRoughnesses(Fs.map((f)=> typeof f.r==="number" ? clamp01(f.r) : 0.5))
-          setMetalnesses(Fs.map((f)=> typeof f.m==="number" ? clamp01(f.m) : 0.5))
-          setTitle(typeof m?.title==="string" ? m.title : (getParam("title") ?? null))
-          const envKey = (m?.env && HDRI_PRESETS[m.env]!==undefined) ? m.env : (getParam("env") || hdriKey)
-          setHdriKey(envKey)
-
+          const palette = ["#f5f5dc", "#8e8e8e", "#ffffff", "#ffd7a8", "#c0c0c0", "#e6f0ff", "#ffeedd"]
+          setColors(Fs.map((f, i) => f.c || palette[i % palette.length]))
+          setOpacities(Fs.map((f) => (typeof f.o === "number" ? clamp01(f.o) : 1)))
+          setVisibles(Fs.map((f) => (typeof f.v === "boolean" ? f.v : true)))
+          setRoughnesses(Fs.map((f) => (typeof f.r === "number" ? clamp01(f.r) : 0.5)))
+          setMetalnesses(Fs.map((f) => (typeof f.m === "number" ? clamp01(f.m) : 0.5)))
+          setTitle(typeof m?.title === "string" ? m.title : (getParam("title") ?? null))
+          const envKey = (m?.env && HDRI_PRESETS[m.env] !== undefined) ? m.env : (getParam("env") || hdriKey)
+          if (HDRI_PRESETS[envKey] !== undefined) setHdriKey(envKey)
           const logoUrl = m?.logo?.url || DEFAULT_LOGO
           setLogoCfg({
             url: logoUrl || null,
             opacity: clamp01(parseFloat(getParam("logoOpacity") ?? "0.9")),
-            width: parseInt(getParam("logoWidth") ?? (window.innerWidth<768 ? "120":"160"),10),
+            width: parseInt(getParam("logoWidth") ?? (window.innerWidth < 768 ? "120" : "160"), 10),
             pos: getParam("logoPos") || "bc",
           })
           return
@@ -554,52 +523,53 @@ export default function ClientPage() {
           let arr = null
           try { arr = JSON.parse(f) } catch {}
           if (!arr) { try { arr = JSON.parse(decodeURIComponent(f)) } catch {} }
-          if (!Array.isArray(arr)) throw new Error("Neplatný formát parametru ?files=")
-          const Fs = arr.filter((x)=>x && x.u).map((x,i)=>({
-            url:x.u, name: stripExt(x.n) || `Model ${i+1}`, rawName:x.n,
-            c:x.c, o: typeof x.o==="number"?x.o:1, v: typeof x.v==="boolean"?x.v:true,
-            r: typeof x.r==="number"?x.r:0.5, m: typeof x.m==="number"?x.m:0.5,
+          if (!Array.isArray(arr)) throw new Error("Neplatný formát ?files=")
+          const Fs = arr.filter((x) => x && x.u).map((x, i) => ({
+            url: x.u, name: stripExt(x.n) || `Model ${i + 1}`, rawName: x.n,
+            c: x.c, o: typeof x.o === "number" ? x.o : 1,
+            v: typeof x.v === "boolean" ? x.v : true,
+            r: typeof x.r === "number" ? x.r : 0.5,
+            m: typeof x.m === "number" ? x.m : 0.5,
             vc: !!x.vc, km: !!x.km,
           }))
           setFiles(Fs)
-          const palette = ["#f5f5dc","#8e8e8e","#ffffff","#ffd7a8","#c0c0c0","#e6f0ff","#ffeedd"]
-          setColors(Fs.map((f,i)=> f.c || palette[i%palette.length]))
-          setOpacities(Fs.map((f)=> typeof f.o==="number" ? clamp01(f.o) : 1))
-          setVisibles(Fs.map((f)=> typeof f.v==="boolean" ? f.v : true))
-          setRoughnesses(Fs.map((f)=> typeof f.r==="number" ? clamp01(f.r) : 0.5))
-          setMetalnesses(Fs.map((f)=> typeof f.m==="number" ? clamp01(f.m) : 0.5))
+          const palette = ["#f5f5dc", "#8e8e8e", "#ffffff", "#ffd7a8", "#c0c0c0", "#e6f0ff", "#ffeedd"]
+          setColors(Fs.map((f, i) => f.c || palette[i % palette.length]))
+          setOpacities(Fs.map((f) => (typeof f.o === "number" ? clamp01(f.o) : 1)))
+          setVisibles(Fs.map((f) => (typeof f.v === "boolean" ? f.v : true)))
+          setRoughnesses(Fs.map((f) => (typeof f.r === "number" ? clamp01(f.r) : 0.5)))
+          setMetalnesses(Fs.map((f) => (typeof f.m === "number" ? clamp01(f.m) : 0.5)))
           setTitle(getParam("title") ?? null)
           const envKey = getParam("env")
           if (envKey && HDRI_PRESETS[envKey] !== undefined) setHdriKey(envKey)
-
           setLogoCfg({
-            url: getParam("logo")==="none" ? null : getParam("logo") || DEFAULT_LOGO,
+            url: getParam("logo") === "none" ? null : getParam("logo") || DEFAULT_LOGO,
             opacity: clamp01(parseFloat(getParam("logoOpacity") ?? "0.9")),
-            width: parseInt(getParam("logoWidth") ?? (window.innerWidth<768 ? "120":"160"),10),
+            width: parseInt(getParam("logoWidth") ?? (window.innerWidth < 768 ? "120" : "160"), 10),
             pos: getParam("logoPos") || "bc",
           })
           return
         }
 
-        // dev fallback (když nepřijde nic)
+        // dev fallback
         const Fs = [
           { url: "/models/Upper.obj", name: "Upper", rawName: "Upper.obj", r: 0.5, m: 0.5, v: true, vc: false, km: false },
           { url: "/models/Lower.stl", name: "Lower", rawName: "Lower.stl", r: 0.5, m: 0.5, v: true, vc: false, km: false },
           { url: "/models/Crown21.ply", name: "Bridge", rawName: "Crown21.ply", r: 0.5, m: 0.5, v: true, vc: false, km: false },
         ]
         setFiles(Fs)
-        const palette = ["#f5f5dc","#8e8e8e","#ffffff"]
-        setColors(Fs.map((_,i)=> palette[i%palette.length]))
-        setOpacities(Fs.map(()=> 1))
-        setVisibles(Fs.map((f)=> f.v))
-        setRoughnesses(Fs.map((f)=> f.r))
-        setMetalnesses(Fs.map((f)=> f.m))
+        const palette = ["#f5f5dc", "#8e8e8e", "#ffffff"]
+        setColors(Fs.map((_, i) => palette[i % palette.length]))
+        setOpacities(Fs.map(() => 1))
+        setVisibles(Fs.map((f) => f.v))
+        setRoughnesses(Fs.map((f) => f.r))
+        setMetalnesses(Fs.map((f) => f.m))
       } catch (e) {
         console.error(e)
         setFatal("Tento náhled není dostupný (chyba při načtení dat).")
       }
     })()
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  }, []) // init
 
   const logoEl = logoCfg.url && (
     <img
@@ -624,186 +594,302 @@ export default function ClientPage() {
   const rootRef = useRef()
 
   return (
-    <div className="stage" style={{ position: "relative", width: "100vw", height: "100vh", background: "black" }}>
-      <GlobalErrorCatcher />
-      <PreloadIcons />
-      {logoEl}
+    <ErrorBoundary>
+      <div className="stage" style={{ position: "relative", width: "100vw", height: "100vh", background: "black" }}>
+        <PreloadIcons />
+        {logoEl}
 
-      {/* Panel */}
-      <div className="controls-panel" style={{
-        position: "absolute", top: 10, left: 10, zIndex: 2,
-        color: "white", fontFamily: "sans-serif", fontSize: "14px",
-        opacity: uiReady ? 1 : 0, transition: "opacity .12s ease",
-        backdropFilter: "blur(3px)", background: "rgba(0,0,0,.25)",
-        border: "1px solid rgba(255,255,255,.15)", borderRadius: 8,
-        padding: "8px 10px", width: "clamp(240px, 30vw, 420px)",
-        maxWidth: "calc(100vw - 20px)", boxSizing: "border-box",
-      }}>
-        {fatal ? (
-          <div style={{ color: "#ff8b8b" }}>{fatal}</div>
-        ) : (
-          <>
-            {envError && (
-              <div style={{ marginBottom: 8, padding: "8px 10px", borderRadius: 6, background: "rgba(255,0,0,.15)", border: "1px solid rgba(255,0,0,.35)" }}>
-                Prostředí (HDRI) se nepodařilo načíst. Pokračuji bez něj.
-              </div>
-            )}
-
-            {files.map((f, i) => (
-              <div key={i} className="control-row" style={{ display: "grid", gridTemplateColumns: "36px 1fr 26px", alignItems: "center", columnGap: 6, rowGap: 6, margin: "6px 0" }}>
-                <div className="row-label" style={{ gridColumn: "1 / -1", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={f.rawName || f.name}>
-                  {stripExt(f.name)}:
-                </div>
-                <div className="row-swatch">
-                  <ColorSwatch color={colors[i] ?? "#ffffff"} onChange={(c) => setColors((prev) => prev.map((v, idx) => (idx === i ? c : v)))} ariaLabel={`${f.name} color`} />
-                </div>
-                <div className="row-slider" style={{ minWidth: 0 }}>
-                  <input className="slider" type="range" min={0} max={1} step={0.01} value={opacities[i] ?? 1}
-                    onChange={(e) => { const v = parseFloat(e.target.value); setOpacities((prev) => prev.map((x, idx) => (idx === i ? v : x))) }}
-                    style={{ width: "calc(100% - 18px)", minWidth: 140 }} aria-label={`${f.name} opacity`} />
-                </div>
-                <button className={`toggle icon-btn ${visibles[i] ? "is-on" : "is-off"}`} onClick={() => setVisibles((prev) => prev.map((v, idx) => (idx === i ? !v : v)))} aria-label={visibles[i] ? `Hide ${f.name}` : `Show ${f.name}`}
-                  style={{ position: "relative", width: 26, height: 22, padding: 0, display: "inline-flex", alignItems: "center", justifyContent: "center", overflow: "hidden", background: "transparent", border: "1px solid white", borderRadius: 6, color: "white", cursor: "pointer" }}>
-                  <img src={ICONS.eye} alt="" width="18" height="18" style={{ position: "absolute", inset: 0, width: 18, height: 18, margin: "auto", opacity: visibles[i] ? 1 : 0, transition: "opacity .06s linear" }} />
-                  <img src={ICONS.eyeOff} alt="" width="18" height="18" style={{ position: "absolute", inset: 0, width: 18, height: 18, margin: "auto", opacity: visibles[i] ? 0 : 1, transition: "opacity .06s linear" }} />
-                </button>
-                <div style={{ gridColumn: "1 / -1", display: "grid", gridTemplateColumns: "auto 1fr auto 1fr", columnGap: 8, alignItems: "center" }}>
-                  <span style={{ fontSize: 12, opacity: 0.85 }}>R:</span>
-                  <input className="slider" type="range" min={0} max={1} step={0.01}
-                    value={roughnesses[i] ?? (typeof f.r === "number" ? f.r : 0.5)}
-                    onChange={(e) => { const v = clamp01(parseFloat(e.target.value)); setRoughnesses((prev) => prev.map((x, idx) => (idx === i ? v : (typeof x === "number" ? x : (idx === i ? v : 0.5))))) }}
-                    style={{ width: "100%", minWidth: 120 }} aria-label={`${f.name} roughness`} />
-                  <span style={{ fontSize: 12, opacity: 0.85 }}>M:</span>
-                  <input className="slider" type="range" min={0} max={1} step={0.01}
-                    value={metalnesses[i] ?? (typeof f.m === "number" ? f.m : 0.5)}
-                    onChange={(e) => { const v = clamp01(parseFloat(e.target.value)); setMetalnesses((prev) => prev.map((x, idx) => (idx === i ? v : (typeof x === "number" ? x : (idx === i ? v : 0.5))))) }}
-                    style={{ width: "100%", minWidth: 120 }} aria-label={`${f.name} metalness`} />
-                </div>
-              </div>
-            ))}
-
-            <div style={{ display: "grid", gridTemplateColumns: "auto 1fr", alignItems: "center", gap: 8, marginTop: 8 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                <button className={`toggle arrow-toggle ${showLights ? "is-open" : "is-closed"}`} onClick={() => setShowLights(!showLights)} aria-label="Toggle lights panel"
-                  style={{ display: "inline-flex", alignItems: "center", gap: 8, padding: "6px 10px", border: "1px solid white", borderRadius: 6, background: "transparent", color: "white", cursor: "pointer" }}>
-                  <span className="arrow-stack" aria-hidden style={{ position: "relative", width: 16, height: 16, display: "inline-block" }}>
-                    <img src={ICONS.arrowClosed} width="16" height="16" style={{ position: "absolute", left: 0, top: 0, opacity: showLights ? 0 : 1 }} alt="" />
-                    <img src={ICONS.arrowOpen} width="16" height="16" style={{ position: "absolute", left: 0, top: 0, opacity: showLights ? 1 : 0 }} alt="" />
-                  </span>
-                  <span className="arrow-label">Světla</span>
-                </button>
-
-                {title && (
-                  <div title={title} style={{ maxWidth: 220, padding: "6px 10px", borderRadius: 8, border: "1px solid rgba(255,255,255,.18)", background: "rgba(255,255,255,.08)", fontSize: 13, fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                    {title}
+        {/* Ovládací panel */}
+        <div
+          className="controls-panel"
+          style={{
+            position: "absolute", top: 10, left: 10, zIndex: 2,
+            color: "white", fontFamily: "sans-serif", fontSize: "14px",
+            opacity: uiReady ? 1 : 0, transition: "opacity .12s ease",
+            backdropFilter: "blur(3px)", background: "rgba(0,0,0,.25)",
+            border: "1px solid rgba(255,255,255,.15)", borderRadius: 8,
+            padding: "8px 10px", width: "clamp(240px, 30vw, 420px)",
+            maxWidth: "calc(100vw - 20px)", boxSizing: "border-box",
+          }}
+        >
+          {fatal ? (
+            <div style={{ color: "#ff8b8b" }}>{fatal}</div>
+          ) : (
+            <>
+              {files.map((f, i) => (
+                <div key={i} className="control-row" style={{
+                  display: "grid", gridTemplateColumns: "36px 1fr 26px",
+                  alignItems: "center", columnGap: 6, rowGap: 6, margin: "6px 0",
+                }}>
+                  <div className="row-label" style={{ gridColumn: "1 / -1", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={f.rawName || f.name}>
+                    {stripExt(f.name)}:
                   </div>
-                )}
+                  <div className="row-swatch">
+                    <ColorSwatch
+                      color={colors[i] ?? "#ffffff"}
+                      onChange={(c) => setColors((prev) => prev.map((v, idx) => (idx === i ? c : v)))}
+                      ariaLabel={`${f.name} color`}
+                    />
+                  </div>
+                  <div className="row-slider" style={{ minWidth: 0 }}>
+                    <input
+                      className="slider"
+                      type="range"
+                      min={0} max={1} step={0.01}
+                      value={opacities[i] ?? 1}
+                      onChange={(e) => {
+                        const v = parseFloat(e.target.value)
+                        setOpacities((prev) => prev.map((x, idx) => (idx === i ? v : x)))
+                      }}
+                      style={{ width: "calc(100% - 18px)", minWidth: 140 }}
+                      aria-label={`${f.name} opacity`}
+                    />
+                  </div>
+                  <button
+                    className={`toggle icon-btn ${visibles[i] ? "is-on" : "is-off"}`}
+                    onClick={() => setVisibles((prev) => prev.map((v, idx) => (idx === i ? !v : v)))}
+                    aria-label={visibles[i] ? `Hide ${f.name}` : `Show ${f.name}`}
+                    style={{
+                      position: "relative", width: 26, height: 22, padding: 0,
+                      display: "inline-flex", alignItems: "center", justifyContent: "center",
+                      overflow: "hidden", background: "transparent",
+                      border: "1px solid white", borderRadius: 6, color: "white", cursor: "pointer",
+                    }}
+                  >
+                    <img src={ICONS.eye} alt="" width="18" height="18" style={{ position: "absolute", inset: 0, width: 18, height: 18, margin: "auto", opacity: visibles[i] ? 1 : 0, transition: "opacity .06s linear" }}/>
+                    <img src={ICONS.eyeOff} alt="" width="18" height="18" style={{ position: "absolute", inset: 0, width: 18, height: 18, margin: "auto", opacity: visibles[i] ? 0 : 1, transition: "opacity .06s linear" }}/>
+                  </button>
 
-                <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-                  <span style={{ opacity: .9 }}>Prostředí:</span>
-                  <select value={hdriKey} onChange={(e) => setHdriKey(e.target.value)}
-                    style={{ background: "rgba(255,255,255,.08)", color: "#fff", border: "1px solid rgba(255,255,255,.2)", borderRadius: 6, padding: "4px 8px" }}>
-                    <option value="none">Žádné</option>
-                    <option value="studioSoft">Studio – soft</option>
-                  </select>
-                </label>
+                  <div style={{ gridColumn: "1 / -1", display: "grid", gridTemplateColumns: "auto 1fr auto 1fr", columnGap: 8, alignItems: "center" }}>
+                    <span style={{ fontSize: 12, opacity: 0.85 }}>R:</span>
+                    <input className="slider" type="range" min={0} max={1} step={0.01}
+                      value={roughnesses[i] ?? (typeof f.r === "number" ? f.r : 0.5)}
+                      onChange={(e) => {
+                        const v = clamp01(parseFloat(e.target.value))
+                        setRoughnesses((prev) => prev.map((x, idx) => (idx === i ? v : (typeof x === "number" ? x : (idx === i ? v : 0.5)))))
+                      }}
+                      style={{ width: "100%", minWidth: 120 }}
+                      aria-label={`${f.name} roughness`}
+                    />
+                    <span style={{ fontSize: 12, opacity: 0.85 }}>M:</span>
+                    <input className="slider" type="range" min={0} max={1} step={0.01}
+                      value={metalnesses[i] ?? (typeof f.m === "number" ? f.m : 0.5)}
+                      onChange={(e) => {
+                        const v = clamp01(parseFloat(e.target.value))
+                        setMetalnesses((prev) => prev.map((x, idx) => (idx === i ? v : (typeof x === "number" ? x : (idx === i ? v : 0.5)))))
+                      }}
+                      style={{ width: "100%", minWidth: 120 }}
+                      aria-label={`${f.name} metalness`}
+                    />
+                  </div>
+                </div>
+              ))}
+
+              {/* Lights + Title + AutoSmooth + HDRI */}
+              <div style={{ display: "grid", gridTemplateColumns: "auto 1fr", alignItems: "center", gap: 8, marginTop: 8 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                  <button
+                    className={`toggle arrow-toggle ${showLights ? "is-open" : "is-closed"}`}
+                    onClick={() => setShowLights(!showLights)}
+                    aria-label="Toggle lights panel"
+                    style={{ display: "inline-flex", alignItems: "center", gap: 8, padding: "6px 10px", border: "1px solid white", borderRadius: 6, background: "transparent", color: "white", cursor: "pointer" }}
+                  >
+                    <span className="arrow-stack" aria-hidden style={{ position: "relative", width: 16, height: 16, display: "inline-block" }}>
+                      <img src={ICONS.arrowClosed} width="16" height="16" style={{ position: "absolute", left: 0, top: 0, opacity: showLights ? 0 : 1 }} alt="" />
+                      <img src={ICONS.arrowOpen} width="16" height="16" style={{ position: "absolute", left: 0, top: 0, opacity: showLights ? 1 : 0 }} alt="" />
+                    </span>
+                    <span className="arrow-label">Světla</span>
+                  </button>
+
+                  {title && (
+                    <div title={title} style={{ maxWidth: 220, padding: "6px 10px", borderRadius: 8, border: "1px solid rgba(255,255,255,.18)", background: "rgba(255,255,255,.08)", fontSize: 13, fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                      {title}
+                    </div>
+                  )}
+
+                  <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                    <span style={{ opacity: .9 }}>Prostředí:</span>
+                    <select
+                      value={hdriKey}
+                      onChange={(e) => setHdriKey(e.target.value)}
+                      style={{
+                        background: "rgba(255,255,255,.08)",
+                        color: "#fff", border: "1px solid rgba(255,255,255,.2)",
+                        borderRadius: 6, padding: "4px 8px"
+                      }}
+                    >
+                      <option value="none">Žádné</option>
+                      <option value="studioSoft">Studio – soft</option>
+                    </select>
+                  </label>
+                </div>
+
+                <div style={{ display: "flex", alignItems: "center", gap: 8, justifyContent: "flex-end" }}>
+                  <label style={{ display: "inline-flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
+                    <input type="checkbox" checked={autoSmooth} onChange={(e) => setAutoSmooth(e.target.checked)} />
+                    <span>Auto smooth</span>
+                  </label>
+                  <span style={{ opacity: 0.8, fontSize: 12 }}>Úhel: {Math.round(smoothAngle)}°</span>
+                  <input className="slider" type="range" min={0} max={80} step={1} value={smoothAngle} onChange={(e) => setSmoothAngle(parseFloat(e.target.value))} style={{ width: 120 }} />
+                </div>
               </div>
 
-              <div style={{ display: "flex", alignItems: "center", gap: 8, justifyContent: "flex-end" }}>
-                <label style={{ display: "inline-flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
-                  <input type="checkbox" checked={autoSmooth} onChange={(e) => setAutoSmooth(e.target.checked)} />
-                  <span>Auto smooth</span>
-                </label>
-                <span style={{ opacity: 0.8, fontSize: 12 }}>Úhel: {Math.round(smoothAngle)}°</span>
-                <input className="slider" type="range" min={0} max={80} step={1} value={smoothAngle} onChange={(e) => setSmoothAngle(parseFloat(e.target.value))} style={{ width: 120 }} />
-              </div>
-            </div>
-          </>
-        )}
-      </div>
+              {showLights && (
+                <div className="lights-wrap" style={{ marginTop: 6 }}>
+                  <div className="lights-row" style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+                    <img src={ICONS.bulb} alt="" width="16" height="16" style={{ width: 16, height: 16 }} />
+                    <span>Light Intensity</span>
+                  </div>
+                  <div className="axis-row" style={{ display: "flex", alignItems: "center", gap: 8, margin: "4px 0" }}>
+                    <span className="axis-label" aria-hidden="true" style={{ width: 18, textAlign: "right", color: "#fff", opacity: 0.9 }}>&nbsp;</span>
+                    <input className="slider" type="range" min={0} max={2} step={0.01} value={lightIntensity} onChange={(e) => setLightIntensity(parseFloat(e.target.value))} style={{ flex: "1 1 auto", width: "100%", minWidth: 140 }}/>
+                  </div>
+                  {[
+                    { label: "Light 1 Position", pos: lightPos1, setPos: setLightPos1 },
+                    { label: "Light 2 Position", pos: lightPos2, setPos: setLightPos2 },
+                    { label: "Light 3 Position", pos: lightPos3, setPos: setLightPos3 },
+                    { label: "Light 4 Position", pos: lightPos4, setPos: setLightPos4 },
+                  ].map((light, idx) => (
+                    <div key={idx} className="light-block" style={{ marginTop: 8 }}>
+                      <div className="lights-row" style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+                        <img src={ICONS.flashlight} alt="" width="16" height="16" style={{ width: 16, height: 16 }} />
+                        <span>{light.label}</span>
+                      </div>
+                      {["x", "y", "z"].map((axis) => (
+                        <div key={axis} className="axis-row" style={{ display: "flex", alignItems: "center", gap: 8, margin: "4px 0" }}>
+                          <span className="axis-label" style={{ width: 18, textAlign: "right", color: "#fff", opacity: 0.9 }}>{axis.toUpperCase()}:</span>
+                          <input className="slider" type="range" min={-10} max={10} step={0.1} value={light.pos[axis]} onChange={(e) => light.setPos({ ...light.pos, [axis]: parseFloat(e.target.value) })} style={{ flex: "1 1 auto", width: "100%", minWidth: 140 }} />
+                        </div>
+                      ))}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </>
+          )}
+        </div>
 
-      {/* CANVAS */}
-      <Canvas
-        orthographic
-        camera={{ position: [0, 0, 100], near: 0.01, far: 100000 }}
-        gl={{ alpha: true }}
-        onCreated={({ gl }) => {
-          gl.setClearAlpha(0)
-          if ("outputColorSpace" in gl) {
-            gl.outputColorSpace = THREE.SRGBColorSpace
-          } else if ("outputEncoding" in gl) {
-            // fallback na starší three (3001 = sRGBEncoding)
-            // @ts-ignore
-            gl.outputEncoding = 3001
+        {/* CANVAS */}
+        <Canvas
+          orthographic
+          camera={{ position: [0, 0, 100], near: 0.01, far: 100000 }}
+          gl={{ alpha: true }}
+          onCreated={({ gl }) => {
+            // defenzivně (r146..r160)
+            try {
+              gl.setClearAlpha?.(0)
+              if ("outputColorSpace" in gl && THREE?.SRGBColorSpace) {
+                gl.outputColorSpace = THREE.SRGBColorSpace
+              } else if ("outputEncoding" in gl && THREE?.sRGBEncoding !== undefined) {
+                gl.outputEncoding = THREE.sRGBEncoding
+              }
+              if (THREE?.ACESFilmicToneMapping !== undefined) gl.toneMapping = THREE.ACESFilmicToneMapping
+              if ("toneMappingExposure" in gl) gl.toneMappingExposure = 1.0
+            } catch (e) {
+              console.warn("GL setup warning:", e)
+            }
+          }}
+          style={{ position: "absolute", inset: 0, zIndex: 1, background: "transparent" }}
+        >
+          {/* HDRI prostředí – případná chyba se ukáže v panelu */}
+          <EnvLoader
+            hdriUrl={HDRI_PRESETS[hdriKey]}
+            envTexRef={envTexRef}
+            onError={(msg) => setFatal((p) => p ?? msg)}
+          />
+
+          {!fatal && (
+            <>
+              <ambientLight intensity={lightIntensity * 0.3} />
+              <directionalLight position={[lightPos1.x, lightPos1.y, lightPos1.z]} intensity={lightIntensity * 1.2} />
+              <directionalLight position={[lightPos2.x, lightPos2.y, lightPos2.z]} intensity={lightIntensity * 0.9} />
+              <directionalLight position={[lightPos3.x, lightPos3.y, lightPos3.z]} intensity={lightIntensity * 1.0} />
+              <directionalLight position={[lightPos4.x, lightPos4.y, lightPos4.z]} intensity={lightIntensity * 0.7} />
+
+              <group ref={rootRef}>
+                <Suspense fallback={null}>
+                  {files.map((f, i) => (
+                    <AnyModel
+                      key={i}
+                      name={f.rawName || f.name}
+                      url={f.url}
+                      color={colors[i] ?? "#ffffff"}
+                      opacity={opacities[i] ?? 1}
+                      visible={visibles[i] ?? true}
+                      onLoaded={handleModelLoaded}
+                      autoSmooth={autoSmooth}
+                      smoothAngle={smoothAngle}
+                      roughness={roughnesses[i] ?? (typeof f.r === "number" ? f.r : 0.5)}
+                      metalness={metalnesses[i] ?? (typeof f.m === "number" ? f.m : 0.5)}
+                      useVertexColors={!!f.vc}
+                      keepMaterials={!!f.km}
+                    />
+                  ))}
+                </Suspense>
+              </group>
+
+              <AutoCenterAndFrame
+                rootRef={rootRef}
+                depsKey={loadedCount === files.length ? `ready-${files.length}` : `loading-${loadedCount}`}
+                setTarget={setCameraTarget}
+                margin={1.2}
+                isMobile={isMobile}
+                desktopScale={0.4}
+                mobileScale={1.0}
+                centerMode={centerMode}
+              />
+              <TouchTrackballControls target={cameraTarget} />
+            </>
+          )}
+        </Canvas>
+
+        <style jsx global>{`
+          .slider { appearance: none; height: 14px; background: transparent; margin: 5px 0; display: inline-block; }
+          .slider::-webkit-slider-runnable-track { height: 4px; background: white; border-radius: 2px; }
+          .slider::-webkit-slider-thumb { appearance: none; width: 14px; height: 14px; border-radius: 50%; background: white; cursor: pointer; box-shadow: 0 0 2px black; margin-top: -5px; }
+          .slider::-moz-range-track { height: 4px; background: white; border-radius: 2px; }
+          .slider::-moz-range-thumb { width: 14px; height: 14px; border-radius: 50%; background: white; cursor: pointer; box-shadow: 0 0 2px black; border: none; }
+
+          @media (max-width: 720px) {
+            .controls-panel {
+              left: 8px !important;
+              right: 8px;
+              width: auto !important;
+              max-width: calc(100vw - 16px) !important;
+            }
           }
-          gl.toneMapping = THREE.ACESFilmicToneMapping
-          gl.toneMappingExposure = 1.0
-        }}
-        style={{ position: "absolute", inset: 0, zIndex: 1, background: "transparent" }}
-      >
-        <EnvLoader
-          hdriUrl={HDRI_PRESETS[hdriKey]}
-          envTexRef={envTexRef}
-          onError={(e) => { console.error("HDRI load failed:", e); setEnvError(true); }}
-        />
+        `}</style>
+      </div>
+    </ErrorBoundary>
+  )
+}
 
-        {!fatal && (
-          <>
-            <ambientLight intensity={lightIntensity * 0.3} />
-            <directionalLight position={[lightPos1.x, lightPos1.y, lightPos1.z]} intensity={lightIntensity * 1.2} />
-            <directionalLight position={[lightPos2.x, lightPos2.y, lightPos2.z]} intensity={lightIntensity * 0.9} />
-            <directionalLight position={[lightPos3.x, lightPos3.y, lightPos3.z]} intensity={lightIntensity * 1.0} />
-            <directionalLight position={[lightPos4.x, lightPos4.y, lightPos4.z]} intensity={lightIntensity * 0.7} />
-
-            <group ref={rootRef}>
-              <Suspense fallback={null}>
-                {files.map((f, i) => (
-                  <AnyModel
-                    key={i}
-                    name={f.rawName || f.name}
-                    url={f.url}
-                    color={colors[i] ?? "#ffffff"}
-                    opacity={opacities[i] ?? 1}
-                    visible={visibles[i] ?? true}
-                    onLoaded={() => handleModelLoaded()}
-                    autoSmooth={autoSmooth}
-                    smoothAngle={smoothAngle}
-                    roughness={roughnesses[i] ?? (typeof f.r === "number" ? f.r : 0.5)}
-                    metalness={metalnesses[i] ?? (typeof f.m === "number" ? f.m : 0.5)}
-                    useVertexColors={!!f.vc}
-                    keepMaterials={!!f.km}
-                  />
-                ))}
-              </Suspense>
-            </group>
-
-            <AutoCenterAndFrame
-              rootRef={rootRef}
-              depsKey={loadedCount === files.length ? `ready-${files.length}` : `loading-${loadedCount}`}
-              setTarget={setCameraTarget}
-              margin={1.2}
-              isMobile={isMobile}
-              desktopScale={0.4}
-              mobileScale={1.0}
-              centerMode={centerMode}
-            />
-            <TouchTrackballControls target={cameraTarget} />
-          </>
-        )}
-      </Canvas>
-
-      {/* Globální styly */}
-      <style jsx global>{`
-        .slider { appearance: none; height: 14px; background: transparent; margin: 5px 0; display: inline-block; }
-        .slider::-webkit-slider-runnable-track { height: 4px; background: white; border-radius: 2px; }
-        .slider::-webkit-slider-thumb { appearance: none; width: 14px; height: 14px; border-radius: 50%; background: white; cursor: pointer; box-shadow: 0 0 2px black; margin-top: -5px; }
-        .slider::-moz-range-track { height: 4px; background: white; border-radius: 2px; }
-        .slider::-moz-range-thumb { width: 14px; height: 14px; border-radius: 50%; background: white; cursor: pointer; box-shadow: 0 0 2px black; border: none; }
-
-        @media (max-width: 720px) {
-          .controls-panel { left: 8px !important; right: 8px; width: auto !important; max-width: calc(100vw - 16px) !important; }
-        }
-      `}</style>
+/* ---------- Color popover (UI) ---------- */
+function ColorSwatch({ color, onChange, ariaLabel }) {
+  const [open, setOpen] = useState(false)
+  const containerRef = useRef(null)
+  useEffect(() => {
+    const onDocClick = (e) => { if (open && containerRef.current && !containerRef.current.contains(e.target)) setOpen(false) }
+    document.addEventListener("mousedown", onDocClick)
+    return () => document.removeEventListener("mousedown", onDocClick)
+  }, [open])
+  return (
+    <div ref={containerRef} className="swatch-wrap" style={{ position: "relative", display: "inline-block" }}>
+      <button
+        aria-label={ariaLabel || "color picker"}
+        onClick={() => setOpen((v) => !v)}
+        className="swatch-btn"
+        style={{ width: 36, height: 22, borderRadius: 4, border: "1px solid #fff", background: color, cursor: "pointer", boxShadow: "0 0 0 1px rgba(0,0,0,.25) inset" }}
+      />
+      {open && (
+        <div className="swatch-pop" style={{ position: "absolute", zIndex: 20, top: 28, left: 0, background: "rgba(0,0,0,.92)", padding: 12, borderRadius: 10, border: "1px solid rgba(255,255,255,.18)", backdropFilter: "blur(4px)", boxShadow: "0 6px 24px rgba(0,0,0,.35)" }}>
+          <HexColorPicker color={color} onChange={onChange} />
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8 }}>
+            <span style={{ color: "#fff", fontSize: 12 }}>#</span>
+            <HexColorInput color={color} onChange={onChange} prefixed={false} style={{ width: 90, padding: "4px 6px", borderRadius: 6, border: "1px solid #444", background: "#111", color: "#fff", fontFamily: "monospace", fontSize: 12 }} />
+          </div>
+        </div>
+      )}
     </div>
   )
 }
