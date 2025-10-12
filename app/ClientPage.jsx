@@ -50,19 +50,16 @@ function inferExt(nameOrUrl) {
   return m ? m[1].toLowerCase() : ""
 }
 
-/* ---------- Auto Smooth (Blender-like) ---------- */
-/** Vypočítá vrcholové normály s prahováním podle úhlu (deg). */
+/* ---------- Auto Smooth ---------- */
 function autoSmoothGeometry(geometry, angleDeg = 30) {
   const angle = Math.max(0, Math.min(89.9, angleDeg))
   const angleRad = (angle * Math.PI) / 180
-  const cosThresh = Math.cos(angleRad)
 
   const g = geometry.index ? geometry.toNonIndexed() : geometry.clone()
   const pos = g.getAttribute("position")
   const vCount = pos.count
   const triCount = vCount / 3
 
-  // face normals
   const faceNormals = new Array(triCount)
   const a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3()
   const cb = new THREE.Vector3(), ab = new THREE.Vector3()
@@ -77,10 +74,8 @@ function autoSmoothGeometry(geometry, angleDeg = 30) {
     faceNormals[f] = cb.clone()
   }
 
-  // skupiny rohů podle pozice (s tolerancí)
   const groups = new Map()
-  const keyOf = (ix) =>
-    `${pos.getX(ix).toFixed(5)},${pos.getY(ix).toFixed(5)},${pos.getZ(ix).toFixed(5)}`
+  const keyOf = (ix) => `${pos.getX(ix).toFixed(5)},${pos.getY(ix).toFixed(5)},${pos.getZ(ix).toFixed(5)}`
   for (let i = 0; i < vCount; i++) {
     const k = keyOf(i)
     let arr = groups.get(k)
@@ -88,16 +83,15 @@ function autoSmoothGeometry(geometry, angleDeg = 30) {
     arr.push(i)
   }
 
-  // spočítat normály pro každý roh
   const normals = new Float32Array(vCount * 3)
   const tmp = new THREE.Vector3()
+  const cosThresh = Math.cos(angleRad)
 
   groups.forEach((cornerIndices) => {
     const localFaceNs = cornerIndices.map((ci) => faceNormals[Math.floor(ci / 3)])
     for (let idx = 0; idx < cornerIndices.length; idx++) {
       const ci = cornerIndices[idx]
       const nRef = localFaceNs[idx]
-
       let nx = 0, ny = 0, nz = 0
       for (let j = 0; j < localFaceNs.length; j++) {
         const nj = localFaceNs[j]
@@ -121,40 +115,38 @@ function autoSmoothGeometry(geometry, angleDeg = 30) {
 function InlineLoader({ text }) {
   return (
     <Html center>
-      <div
-        style={{
-          background: "rgba(0,0,0,0.7)",
-          padding: "16px 28px",
-          borderRadius: 10,
-          color: "white",
-          fontFamily: "sans-serif",
-          fontSize: 16,
-        }}
-      >
+      <div style={{ background: "rgba(0,0,0,0.7)", padding: "16px 28px", borderRadius: 10, color: "white", fontFamily: "sans-serif", fontSize: 16 }}>
         ⏳ {text || "Načítám…"}
       </div>
     </Html>
   )
 }
 
-/* ---------- AnyModel (OBJ/STL/PLY) ---------- */
-function AnyModel({ name, url, color, opacity, visible, onLoaded, autoSmooth, smoothAngle }) {
+/* ---------- AnyModel ---------- */
+function AnyModel({
+  name, url,
+  color, opacity, visible,
+  onLoaded, autoSmooth, smoothAngle,
+  roughness = 0.5, metalness = 0.5,
+  useVertexColors = false,
+  keepMaterials = false,
+}) {
   const [object3D, setObject3D] = useState(null)
   const [loading, setLoading] = useState(true)
   const ext = useMemo(() => inferExt(name || url), [name, url])
 
-  const makeMaterial = () =>
+  const makeMat = (opts = {}) =>
     new THREE.MeshStandardMaterial({
-      color: new THREE.Color(color),
+      color: new THREE.Color(color || "#ffffff"),
+      roughness: typeof roughness === "number" ? roughness : 0.5,
+      metalness: typeof metalness === "number" ? metalness : 0.5,
       transparent: opacity < 1,
       opacity,
-      metalness: 0.5,
-      roughness: 0.5,
       side: THREE.DoubleSide,
       depthWrite: opacity === 1,
+      ...opts,
     })
 
-  // načtení objektu
   useEffect(() => {
     let cancelled = false
     setLoading(true)
@@ -164,18 +156,47 @@ function AnyModel({ name, url, color, opacity, visible, onLoaded, autoSmooth, sm
         if (ext === "stl") {
           const geom = await new STLLoader().loadAsync(url)
           if (!geom.attributes.normal) geom.computeVertexNormals()
-          obj = new THREE.Mesh(geom, makeMaterial())
+          const base = autoSmooth ? autoSmoothGeometry(geom, smoothAngle) : (geom.computeVertexNormals(), geom)
+          const mat = makeMat()
+          obj = new THREE.Mesh(base, mat)
+          obj.userData._baseGeom = geom
+          obj.userData._derivedGeom = base
         } else if (ext === "ply") {
           const geom = await new PLYLoader().loadAsync(url)
-          if (!geom.attributes.normal) geom.computeVertexNormals()
-          obj = new THREE.Mesh(geom, makeMaterial())
+          const hasVC = !!geom.getAttribute("color")
+          let base = geom
+          if (autoSmooth) base = autoSmoothGeometry(geom, smoothAngle)
+          else if (!geom.attributes.normal) geom.computeVertexNormals()
+
+          const mat = hasVC && useVertexColors
+            ? makeMat({ vertexColors: true, color: new THREE.Color("#ffffff") })
+            : makeMat()
+
+          obj = new THREE.Mesh(base, mat)
+          obj.userData._baseGeom = geom
+          obj.userData._derivedGeom = base
         } else {
-          obj = await new OBJLoader().loadAsync(url)
-          const mat = makeMaterial()
-          obj.traverse((child) => {
-            if (child.isMesh) child.material = mat
-          })
+          const loaded = await new OBJLoader().loadAsync(url)
+          if (keepMaterials) {
+            loaded.traverse((child) => {
+              if (child.isMesh) {
+                const mat = child.material
+                if (mat) {
+                  if ("transparent" in mat) mat.transparent = opacity < 1
+                  if ("opacity" in mat) mat.opacity = opacity
+                  if ("roughness" in mat && typeof roughness === "number") mat.roughness = roughness
+                  if ("metalness" in mat && typeof metalness === "number") mat.metalness = metalness
+                }
+              }
+            })
+            obj = loaded
+          } else {
+            const mat = makeMat()
+            loaded.traverse((child) => { if (child.isMesh) child.material = mat })
+            obj = loaded
+          }
         }
+
         if (!cancelled) {
           setObject3D(obj)
           setLoading(false)
@@ -190,16 +211,20 @@ function AnyModel({ name, url, color, opacity, visible, onLoaded, autoSmooth, sm
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [url, ext])
 
-  // (PATCH) Přepočet GEOMETRIE jen při změně autoSmooth / smoothAngle nebo po načtení
+  // AutoSmooth re-aplikace při změně
   useEffect(() => {
     if (!object3D) return
     object3D.traverse((child) => {
       if (!child.isMesh) return
       if (!child.userData._baseGeom) child.userData._baseGeom = child.geometry
       const base = child.userData._baseGeom
-      const newGeom = autoSmooth
-        ? autoSmoothGeometry(base, smoothAngle)
-        : (() => { const g = base.clone(); g.computeVertexNormals(); return g })()
+
+      let newGeom = base
+      if (autoSmooth) newGeom = autoSmoothGeometry(base, smoothAngle)
+      else {
+        newGeom = base.clone()
+        newGeom.computeVertexNormals()
+      }
 
       if (child.userData._derivedGeom && child.userData._derivedGeom !== base) {
         child.userData._derivedGeom.dispose()
@@ -209,20 +234,40 @@ function AnyModel({ name, url, color, opacity, visible, onLoaded, autoSmooth, sm
     })
   }, [object3D, autoSmooth, smoothAngle])
 
-  // (PATCH) Materiál zvlášť – rychlé, neřeší geometrii
+  // Materiál a vzhled – respektuje VC/keepMaterials
   useEffect(() => {
     if (!object3D) return
-    const mat = makeMaterial()
     object3D.traverse((child) => {
-      if (child.isMesh) child.material = mat
+      if (!child.isMesh) return
+      if (keepMaterials) {
+        const mat = child.material
+        if (mat) {
+          if ("transparent" in mat) mat.transparent = opacity < 1
+          if ("opacity" in mat) mat.opacity = opacity
+          if ("roughness" in mat && typeof roughness === "number") mat.roughness = roughness
+          if ("metalness" in mat && typeof metalness === "number") mat.metalness = metalness
+          if (!useVertexColors && "color" in mat && color) mat.color = new THREE.Color(color)
+          if (useVertexColors && "vertexColors" in mat) {
+            mat.vertexColors = true
+            if ("color" in mat) mat.color = new THREE.Color("#ffffff")
+          }
+          mat.needsUpdate = true
+        }
+      } else {
+        const hasVC = !!child.geometry.getAttribute?.("color")
+        const mat = hasVC && useVertexColors
+          ? makeMat({ vertexColors: true, color: new THREE.Color("#ffffff") })
+          : makeMat()
+        child.material = mat
+      }
     })
-  }, [object3D, color, opacity])
+  }, [object3D, color, opacity, roughness, metalness, useVertexColors, keepMaterials])
 
   if (!object3D) return loading ? <InlineLoader text={`Načítám ${name || url}`} /> : null
   return visible ? <primitive object={object3D} /> : null
 }
 
-/* ---------- Trackball & target (UVNITŘ Canvas) ---------- */
+/* ---------- Trackball ---------- */
 function TouchTrackballControls({ target = [0, 0, 0] }) {
   const { camera, gl } = useThree()
   const controlsRef = useRef(null)
@@ -234,15 +279,13 @@ function TouchTrackballControls({ target = [0, 0, 0] }) {
     controls.panSpeed = 1.0
     controls.staticMoving = true
     controlsRef.current = controls
-
-    const handleTouchStart = (e) => { e.preventDefault(); controls.handleTouchStart(e) }
-    const handleTouchMove = (e) => { e.preventDefault(); controls.handleTouchMove(e) }
-    gl.domElement.addEventListener("touchstart", handleTouchStart, { passive: false })
-    gl.domElement.addEventListener("touchmove", handleTouchMove, { passive: false })
-
+    const ts = (e) => { e.preventDefault(); controls.handleTouchStart(e) }
+    const tm = (e) => { e.preventDefault(); controls.handleTouchMove(e) }
+    gl.domElement.addEventListener("touchstart", ts, { passive: false })
+    gl.domElement.addEventListener("touchmove", tm, { passive: false })
     return () => {
-      gl.domElement.removeEventListener("touchstart", handleTouchStart)
-      gl.domElement.removeEventListener("touchmove", handleTouchMove)
+      gl.domElement.removeEventListener("touchstart", ts)
+      gl.domElement.removeEventListener("touchmove", tm)
       controls.dispose()
     }
   }, [camera, gl])
@@ -255,28 +298,20 @@ function TouchTrackballControls({ target = [0, 0, 0] }) {
 
   useFrame(() => {
     if (!controlsRef.current) return
-    if (camera.isOrthographicCamera) {
-      controlsRef.current.panSpeed = camera.zoom * 0.4
-    }
+    if (camera.isOrthographicCamera) controlsRef.current.panSpeed = camera.zoom * 0.4
     controlsRef.current.update()
   })
 
   return null
 }
 
-/* ---------- AutoCenter & AutoFrame (UVNITŘ Canvas) ---------- */
+/* ---------- AutoCenter & AutoFrame ---------- */
 function AutoCenterAndFrame({
-  rootRef,
-  depsKey,
-  setTarget,
-  margin = 1.2,
-  isMobile = false,
-  desktopScale = 0.4,
-  mobileScale = 1.0,
+  rootRef, depsKey, setTarget,
+  margin = 1.2, isMobile = false, desktopScale = 0.4, mobileScale = 1.0,
   centerMode = "combined",
 }) {
   const { camera, size } = useThree()
-
   useEffect(() => {
     const root = rootRef.current
     if (!root) return
@@ -285,10 +320,10 @@ function AutoCenterAndFrame({
     const boxAll = new THREE.Box3().setFromObject(root)
     if (boxAll.isEmpty()) return
 
-    const sizeAll = new THREE.Vector3()
     const centerAll = new THREE.Vector3()
-    boxAll.getSize(sizeAll)
+    const dims = new THREE.Vector3()
     boxAll.getCenter(centerAll)
+    boxAll.getSize(dims)
 
     if (centerMode === "per") {
       root.children.forEach((child) => {
@@ -309,13 +344,13 @@ function AutoCenterAndFrame({
     }
 
     const after = new THREE.Box3().setFromObject(root)
-    const dims = new THREE.Vector3()
+    const dims2 = new THREE.Vector3()
     const ctr = new THREE.Vector3()
-    after.getSize(dims)
+    after.getSize(dims2)
     after.getCenter(ctr)
 
-    const objW = Math.max(dims.x, 1e-6)
-    const objH = Math.max(dims.y, 1e-6)
+    const objW = Math.max(dims2.x, 1e-6)
+    const objH = Math.max(dims2.y, 1e-6)
     const zoomX = size.width / (objW * margin)
     const zoomY = size.height / (objH * margin)
     let newZoom = Math.min(zoomX, zoomY)
@@ -347,34 +382,14 @@ function ColorSwatch({ color, onChange, ariaLabel }) {
         aria-label={ariaLabel || "color picker"}
         onClick={() => setOpen((v) => !v)}
         className="swatch-btn"
-        style={{
-          width: 36, height: 22, borderRadius: 4, border: "1px solid #fff",
-          background: color, cursor: "pointer", boxShadow: "0 0 0 1px rgba(0,0,0,.25) inset",
-        }}
+        style={{ width: 36, height: 22, borderRadius: 4, border: "1px solid #fff", background: color, cursor: "pointer", boxShadow: "0 0 0 1px rgba(0,0,0,.25) inset" }}
       />
       {open && (
-        <div
-          className="swatch-pop"
-          style={{
-            position: "absolute", zIndex: 20, top: 28, left: 0,
-            background: "rgba(0,0,0,.92)", padding: 12, borderRadius: 10,
-            border: "1px solid rgba(255,255,255,.18)", backdropFilter: "blur(4px)",
-            boxShadow: "0 6px 24px rgba(0,0,0,.35)",
-          }}
-        >
+        <div className="swatch-pop" style={{ position: "absolute", zIndex: 20, top: 28, left: 0, background: "rgba(0,0,0,.92)", padding: 12, borderRadius: 10, border: "1px solid rgba(255,255,255,.18)", backdropFilter: "blur(4px)", boxShadow: "0 6px 24px rgba(0,0,0,.35)" }}>
           <HexColorPicker color={color} onChange={onChange} />
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8 }}>
             <span style={{ color: "#fff", fontSize: 12 }}>#</span>
-            <HexColorInput
-              color={color}
-              onChange={onChange}
-              prefixed={false}
-              style={{
-                width: 90, padding: "4px 6px", borderRadius: 6,
-                border: "1px solid #444", background: "#111", color: "#fff",
-                fontFamily: "monospace", fontSize: 12,
-              }}
-            />
+            <HexColorInput color={color} onChange={onChange} prefixed={false} style={{ width: 90, padding: "4px 6px", borderRadius: 6, border: "1px solid #444", background: "#111", color: "#fff", fontFamily: "monospace", fontSize: 12 }} />
           </div>
         </div>
       )}
@@ -393,10 +408,7 @@ export default function ClientPage() {
   const [showLights, setShowLights] = useState(false)
 
   const [uiReady, setUiReady] = useState(false)
-  useEffect(() => {
-    const id = requestAnimationFrame(() => setUiReady(true))
-    return () => cancelAnimationFrame(id)
-  }, [])
+  useEffect(() => { const id = requestAnimationFrame(() => setUiReady(true)); return () => cancelAnimationFrame(id) }, [])
 
   const [isMobile, setIsMobile] = useState(false)
   useEffect(() => {
@@ -408,11 +420,13 @@ export default function ClientPage() {
 
   const [title, setTitle] = useState(null)
 
-  // modely + vzhled
-  const [files, setFiles] = useState([])
+  // modely
+  const [files, setFiles] = useState([]) // {url,name,rawName,c,o,v,r,m,vc,km}
   const [colors, setColors] = useState([])
   const [opacities, setOpacities] = useState([])
   const [visibles, setVisibles] = useState([])
+  const [roughnesses, setRoughnesses] = useState([])
+  const [metalnesses, setMetalnesses] = useState([])
   const [fatal, setFatal] = useState(null)
 
   // auto smooth
@@ -424,18 +438,14 @@ export default function ClientPage() {
 
   const [logoCfg, setLogoCfg] = useState({ url: DEFAULT_LOGO, opacity: 0.9, width: 160, pos: "bc" })
 
-  // Trackball target
   const [cameraTarget, setCameraTarget] = useState([0, 0, 0])
-
-  // načtené objekty count (trigger centra/fitu)
   const [loadedCount, setLoadedCount] = useState(0)
   const handleModelLoaded = () => setLoadedCount((n) => n + 1)
 
-  // parametr centrování
   const centerParam = (getParam("center") || "combined").toLowerCase()
   const centerMode = ["per", "combined", "none"].includes(centerParam) ? centerParam : "combined"
 
-  // init – manifest > files
+  // init
   useEffect(() => {
     ;(async () => {
       try {
@@ -448,13 +458,20 @@ export default function ClientPage() {
             rawName: x.n,
             c: x.c,
             o: typeof x.o === "number" ? x.o : 1,
+            v: typeof x.v === "boolean" ? x.v : true,
+            r: typeof x.r === "number" ? x.r : 0.5,
+            m: typeof x.m === "number" ? x.m : 0.5,
+            vc: !!x.vc,
+            km: !!x.km,
           }))
           if (!Fs.length) throw new Error("Manifest je prázdný.")
           setFiles(Fs)
           const palette = ["#f5f5dc", "#8e8e8e", "#ffffff", "#ffd7a8", "#c0c0c0", "#e6f0ff", "#ffeedd"]
           setColors(Fs.map((f, i) => f.c || palette[i % palette.length]))
           setOpacities(Fs.map((f) => (typeof f.o === "number" ? clamp01(f.o) : 1)))
-          setVisibles(Fs.map(() => true))
+          setVisibles(Fs.map((f) => (typeof f.v === "boolean" ? f.v : true)))
+          setRoughnesses(Fs.map((f) => (typeof f.r === "number" ? clamp01(f.r) : 0.5)))
+          setMetalnesses(Fs.map((f) => (typeof f.m === "number" ? clamp01(f.m) : 0.5)))
           setTitle(typeof m?.title === "string" ? m.title : (getParam("title") ?? null))
           const logoUrl = m?.logo?.url || DEFAULT_LOGO
           setLogoCfg({
@@ -468,25 +485,29 @@ export default function ClientPage() {
 
         const f = getParam("files")
         if (f) {
-          // bezpečný parse (raw i URL-enkódované)
           let arr = null
           try { arr = JSON.parse(f) } catch {}
           if (!arr) { try { arr = JSON.parse(decodeURIComponent(f)) } catch {} }
           if (!Array.isArray(arr)) throw new Error("Neplatný formát parametru ?files=")
-          const Fs = arr
-            .filter((x) => x && x.u)
-            .map((x, i) => ({
-              url: x.u,
-              name: stripExt(x.n) || `Model ${i + 1}`,
-              rawName: x.n,
-              c: x.c,
-              o: typeof x.o === "number" ? x.o : 1,
-            }))
+          const Fs = arr.filter((x) => x && x.u).map((x, i) => ({
+            url: x.u,
+            name: stripExt(x.n) || `Model ${i + 1}`,
+            rawName: x.n,
+            c: x.c,
+            o: typeof x.o === "number" ? x.o : 1,
+            v: typeof x.v === "boolean" ? x.v : true,
+            r: typeof x.r === "number" ? x.r : 0.5,
+            m: typeof x.m === "number" ? x.m : 0.5,
+            vc: !!x.vc,
+            km: !!x.km,
+          }))
           setFiles(Fs)
           const palette = ["#f5f5dc", "#8e8e8e", "#ffffff", "#ffd7a8", "#c0c0c0", "#e6f0ff", "#ffeedd"]
           setColors(Fs.map((f, i) => f.c || palette[i % palette.length]))
           setOpacities(Fs.map((f) => (typeof f.o === "number" ? clamp01(f.o) : 1)))
-          setVisibles(Fs.map(() => true))
+          setVisibles(Fs.map((f) => (typeof f.v === "boolean" ? f.v : true)))
+          setRoughnesses(Fs.map((f) => (typeof f.r === "number" ? clamp01(f.r) : 0.5)))
+          setMetalnesses(Fs.map((f) => (typeof f.m === "number" ? clamp01(f.m) : 0.5)))
           setTitle(getParam("title") ?? null)
           setLogoCfg({
             url: getParam("logo") === "none" ? null : getParam("logo") || DEFAULT_LOGO,
@@ -499,15 +520,17 @@ export default function ClientPage() {
 
         // dev fallback
         const Fs = [
-          { url: "/models/Upper.obj", name: "Upper", rawName: "Upper.obj" },
-          { url: "/models/Lower.stl", name: "Lower", rawName: "Lower.stl" },
-          { url: "/models/Crown21.ply", name: "Bridge", rawName: "Crown21.ply" },
+          { url: "/models/Upper.obj", name: "Upper", rawName: "Upper.obj", r: 0.5, m: 0.5, v: true, vc: false, km: false },
+          { url: "/models/Lower.stl", name: "Lower", rawName: "Lower.stl", r: 0.5, m: 0.5, v: true, vc: false, km: false },
+          { url: "/models/Crown21.ply", name: "Bridge", rawName: "Crown21.ply", r: 0.5, m: 0.5, v: true, vc: false, km: false },
         ]
         setFiles(Fs)
         const palette = ["#f5f5dc", "#8e8e8e", "#ffffff"]
         setColors(Fs.map((_, i) => palette[i % palette.length]))
         setOpacities(Fs.map(() => 1))
-        setVisibles(Fs.map(() => true))
+        setVisibles(Fs.map((f) => f.v))
+        setRoughnesses(Fs.map((f) => f.r))
+        setMetalnesses(Fs.map((f) => f.m))
       } catch (e) {
         console.error(e)
         setFatal("Tento náhled není dostupný (chyba při načtení dat).")
@@ -515,7 +538,7 @@ export default function ClientPage() {
     })()
   }, [])
 
-  // LOGO pod scénou
+  // LOGO
   const logoEl = logoCfg.url && (
     <img
       src={logoCfg.url}
@@ -549,22 +572,13 @@ export default function ClientPage() {
         className="controls-panel"
         style={{
           position: "absolute",
-          top: 10,
-          left: 10,
-          zIndex: 2,
-          color: "white",
-          fontFamily: "sans-serif",
-          fontSize: "14px",
-          opacity: uiReady ? 1 : 0,
-          transition: "opacity .12s ease",
-          backdropFilter: "blur(3px)",
-          background: "rgba(0,0,0,.25)",
-          border: "1px solid rgba(255,255,255,.15)",
-          borderRadius: 8,
-          padding: "8px 10px",
-          width: "clamp(240px, 30vw, 420px)",
-          maxWidth: "calc(100vw - 20px)",
-          boxSizing: "border-box",
+          top: 10, left: 10, zIndex: 2,
+          color: "white", fontFamily: "sans-serif", fontSize: "14px",
+          opacity: uiReady ? 1 : 0, transition: "opacity .12s ease",
+          backdropFilter: "blur(3px)", background: "rgba(0,0,0,.25)",
+          border: "1px solid rgba(255,255,255,.15)", borderRadius: 8,
+          padding: "8px 10px", width: "clamp(240px, 30vw, 420px)",
+          maxWidth: "calc(100vw - 20px)", boxSizing: "border-box",
         }}
       >
         {fatal ? (
@@ -572,30 +586,12 @@ export default function ClientPage() {
         ) : (
           <>
             {files.map((f, i) => (
-              <div
-                className="control-row"
-                key={i}
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "36px 1fr 26px", // swatch | slider | eye
-                  gridAutoRows: "auto",
-                  alignItems: "center",
-                  columnGap: 6,
-                  rowGap: 6,
-                  margin: "6px 0",
-                }}
-              >
-                {/* Label nahoře přes celý řádek */}
-                <div
-                  className="row-label"
-                  style={{
-                    gridColumn: "1 / -1",
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                    whiteSpace: "nowrap",
-                  }}
-                  title={f.rawName || f.name}
-                >
+              <div key={i} className="control-row" style={{
+                display: "grid", gridTemplateColumns: "36px 1fr 26px",
+                alignItems: "center", columnGap: 6, rowGap: 6, margin: "6px 0",
+              }}>
+                {/* Label */}
+                <div className="row-label" style={{ gridColumn: "1 / -1", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={f.rawName || f.name}>
                   {stripExt(f.name)}:
                 </div>
 
@@ -608,20 +604,19 @@ export default function ClientPage() {
                   />
                 </div>
 
-                {/* Slider – jednotná délka, nezasahuje pod oko */}
+                {/* Slider – Opacity */}
                 <div className="row-slider" style={{ minWidth: 0 }}>
                   <input
                     className="slider"
                     type="range"
-                    min={0}
-                    max={1}
-                    step={0.01}
+                    min={0} max={1} step={0.01}
                     value={opacities[i] ?? 1}
                     onChange={(e) => {
                       const v = parseFloat(e.target.value)
                       setOpacities((prev) => prev.map((x, idx) => (idx === i ? v : x)))
                     }}
                     style={{ width: "calc(100% - 18px)", minWidth: 140 }}
+                    aria-label={`${f.name} opacity`}
                   />
                 </div>
 
@@ -631,57 +626,56 @@ export default function ClientPage() {
                   onClick={() => setVisibles((prev) => prev.map((v, idx) => (idx === i ? !v : v)))}
                   aria-label={visibles[i] ? `Hide ${f.name}` : `Show ${f.name}`}
                   style={{
-                    position: "relative",
-                    width: 26,
-                    height: 22,
-                    padding: 0,
-                    display: "inline-flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    overflow: "hidden",
-                    background: "transparent",
-                    border: "1px solid white",
-                    borderRadius: 6,
-                    color: "white",
-                    cursor: "pointer",
+                    position: "relative", width: 26, height: 22, padding: 0,
+                    display: "inline-flex", alignItems: "center", justifyContent: "center",
+                    overflow: "hidden", background: "transparent",
+                    border: "1px solid white", borderRadius: 6, color: "white", cursor: "pointer",
                   }}
                 >
-                  <img
-                    src={ICONS.eye}
-                    alt=""
-                    width="18"
-                    height="18"
-                    style={{ position: "absolute", inset: 0, width: 18, height: 18, margin: "auto", opacity: visibles[i] ? 1 : 0, transition: "opacity .06s linear" }}
-                  />
-                  <img
-                    src={ICONS.eyeOff}
-                    alt=""
-                    width="18"
-                    height="18"
-                    style={{ position: "absolute", inset: 0, width: 18, height: 18, margin: "auto", opacity: visibles[i] ? 0 : 1, transition: "opacity .06s linear" }}
-                  />
+                  <img src={ICONS.eye} alt="" width="18" height="18" style={{ position: "absolute", inset: 0, width: 18, height: 18, margin: "auto", opacity: visibles[i] ? 1 : 0, transition: "opacity .06s linear" }}/>
+                  <img src={ICONS.eyeOff} alt="" width="18" height="18" style={{ position: "absolute", inset: 0, width: 18, height: 18, margin: "auto", opacity: visibles[i] ? 0 : 1, transition: "opacity .06s linear" }}/>
                 </button>
+
+                {/* Druhý řádek: Roughness + Metalness */}
+                <div style={{ gridColumn: "1 / -1", display: "grid", gridTemplateColumns: "auto 1fr auto 1fr", columnGap: 8, alignItems: "center" }}>
+                  <span style={{ fontSize: 12, opacity: 0.85 }}>R:</span>
+                  <input
+                    className="slider"
+                    type="range"
+                    min={0} max={1} step={0.01}
+                    value={roughnesses[i] ?? (typeof f.r === "number" ? f.r : 0.5)}
+                    onChange={(e) => {
+                      const v = clamp01(parseFloat(e.target.value))
+                      setRoughnesses((prev) => prev.map((x, idx) => (idx === i ? v : (typeof x === "number" ? x : (idx === i ? v : 0.5)))))
+                    }}
+                    style={{ width: "100%", minWidth: 120 }}
+                    aria-label={`${f.name} roughness`}
+                  />
+                  <span style={{ fontSize: 12, opacity: 0.85 }}>M:</span>
+                  <input
+                    className="slider"
+                    type="range"
+                    min={0} max={1} step={0.01}
+                    value={metalnesses[i] ?? (typeof f.m === "number" ? f.m : 0.5)}
+                    onChange={(e) => {
+                      const v = clamp01(parseFloat(e.target.value))
+                      setMetalnesses((prev) => prev.map((x, idx) => (idx === i ? v : (typeof x === "number" ? x : (idx === i ? v : 0.5)))))
+                    }}
+                    style={{ width: "100%", minWidth: 120 }}
+                    aria-label={`${f.name} metalness`}
+                  />
+                </div>
               </div>
             ))}
 
-            {/* Řádek: Světla + Titulek + Auto Smooth */}
+            {/* Světla + Titulek + AutoSmooth */}
             <div style={{ display: "grid", gridTemplateColumns: "auto 1fr", alignItems: "center", gap: 8, marginTop: 8 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                 <button
                   className={`toggle arrow-toggle ${showLights ? "is-open" : "is-closed"}`}
                   onClick={() => setShowLights(!showLights)}
                   aria-label="Toggle lights panel"
-                  style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: 8,
-                    padding: "6px 10px",
-                    border: "1px solid white",
-                    borderRadius: 6,
-                    background: "transparent",
-                    color: "white",
-                    cursor: "pointer",
-                  }}
+                  style={{ display: "inline-flex", alignItems: "center", gap: 8, padding: "6px 10px", border: "1px solid white", borderRadius: 6, background: "transparent", color: "white", cursor: "pointer" }}
                 >
                   <span className="arrow-stack" aria-hidden style={{ position: "relative", width: 16, height: 16, display: "inline-block" }}>
                     <img src={ICONS.arrowClosed} width="16" height="16" style={{ position: "absolute", left: 0, top: 0, opacity: showLights ? 0 : 1 }} alt="" />
@@ -690,49 +684,20 @@ export default function ClientPage() {
                   <span className="arrow-label">Světla</span>
                 </button>
 
-                {/* Titulek (pokud je) */}
                 {title && (
-                  <div
-                    title={title}
-                    style={{
-                      maxWidth: 220,
-                      padding: "6px 10px",
-                      borderRadius: 8,
-                      border: "1px solid rgba(255,255,255,.18)",
-                      background: "rgba(255,255,255,.08)",
-                      fontSize: 13,
-                      fontWeight: 600,
-                      whiteSpace: "nowrap",
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                    }}
-                  >
+                  <div title={title} style={{ maxWidth: 220, padding: "6px 10px", borderRadius: 8, border: "1px solid rgba(255,255,255,.18)", background: "rgba(255,255,255,.08)", fontSize: 13, fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                     {title}
                   </div>
                 )}
               </div>
 
-              {/* Auto Smooth ovládání */}
               <div style={{ display: "flex", alignItems: "center", gap: 8, justifyContent: "flex-end" }}>
                 <label style={{ display: "inline-flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
-                  <input
-                    type="checkbox"
-                    checked={autoSmooth}
-                    onChange={(e) => setAutoSmooth(e.target.checked)}
-                  />
+                  <input type="checkbox" checked={autoSmooth} onChange={(e) => setAutoSmooth(e.target.checked)} />
                   <span>Auto smooth</span>
                 </label>
                 <span style={{ opacity: 0.8, fontSize: 12 }}>Úhel: {Math.round(smoothAngle)}°</span>
-                <input
-                  className="slider"
-                  type="range"
-                  min={0}
-                  max={80}
-                  step={1}
-                  value={smoothAngle}
-                  onChange={(e) => setSmoothAngle(parseFloat(e.target.value))}
-                  style={{ width: 120 }}
-                />
+                <input className="slider" type="range" min={0} max={80} step={1} value={smoothAngle} onChange={(e) => setSmoothAngle(parseFloat(e.target.value))} style={{ width: 120 }} />
               </div>
             </div>
 
@@ -760,16 +725,7 @@ export default function ClientPage() {
                     {["x", "y", "z"].map((axis) => (
                       <div key={axis} className="axis-row" style={{ display: "flex", alignItems: "center", gap: 8, margin: "4px 0" }}>
                         <span className="axis-label" style={{ width: 18, textAlign: "right", color: "#fff", opacity: 0.9 }}>{axis.toUpperCase()}:</span>
-                        <input
-                          className="slider"
-                          type="range"
-                          min={-10}
-                          max={10}
-                          step={0.1}
-                          value={light.pos[axis]}
-                          onChange={(e) => light.setPos({ ...light.pos, [axis]: parseFloat(e.target.value) })}
-                          style={{ flex: "1 1 auto", width: "100%", minWidth: 140 }}
-                        />
+                        <input className="slider" type="range" min={-10} max={10} step={0.1} value={light.pos[axis]} onChange={(e) => light.setPos({ ...light.pos, [axis]: parseFloat(e.target.value) })} style={{ flex: "1 1 auto", width: "100%", minWidth: 140 }} />
                       </div>
                     ))}
                   </div>
@@ -809,6 +765,10 @@ export default function ClientPage() {
                     onLoaded={handleModelLoaded}
                     autoSmooth={autoSmooth}
                     smoothAngle={smoothAngle}
+                    roughness={roughnesses[i] ?? (typeof f.r === "number" ? f.r : 0.5)}
+                    metalness={metalnesses[i] ?? (typeof f.m === "number" ? f.m : 0.5)}
+                    useVertexColors={!!f.vc}
+                    keepMaterials={!!f.km}
                   />
                 ))}
               </Suspense>
@@ -829,7 +789,7 @@ export default function ClientPage() {
         )}
       </Canvas>
 
-      {/* Globální styly sliderů + responzivní panel */}
+      {/* Globální styly */}
       <style jsx global>{`
         .slider { appearance: none; height: 14px; background: transparent; margin: 5px 0; display: inline-block; }
         .slider::-webkit-slider-runnable-track { height: 4px; background: white; border-radius: 2px; }
