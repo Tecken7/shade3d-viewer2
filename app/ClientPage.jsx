@@ -269,55 +269,35 @@ function AnyModel({
 
 /* ---------- Headlight (PointLight přichycený ke kameře) ---------- */
 function Headlight({ enabled = true, intensity = 1, color = "#ffffff", showHelper = false }) {
-  const { camera } = useThree()
+  const { camera, scene } = useThree()
   const lightRef = useRef(null)
-  const helperRef = useRef(null)
 
-  // vytvoř světlo JEDNOU a přichyť ho ke kameře; viditelnost/intenzitu řídíme přes props
+  // Drž světlo v R3F stromu a jen ho přenášej na pozici kamery
+  useFrame(() => {
+    if (!lightRef.current) return
+    lightRef.current.position.copy(camera.position)
+  })
+
+  // Volitelný helper pro vizuální kontrolu
   useEffect(() => {
-    const light = new THREE.PointLight(color, intensity, 0, 0) // distance=0, decay=0
-    light.position.set(0, 0, 0)
-    camera.add(light)
-    lightRef.current = light
-
+    if (!showHelper || !lightRef.current) return
+    const helper = new THREE.PointLightHelper(lightRef.current, 5)
+    scene.add(helper)
     return () => {
-      camera.remove(light)
-      lightRef.current = null
+      scene.remove(helper)
+      helper.dispose?.()
     }
-  }, [camera])
+  }, [showHelper, scene])
 
-  // props → runtime aktualizace
-  useEffect(() => {
-    const light = lightRef.current
-    if (!light) return
-    light.visible = !!enabled
-    light.intensity = intensity
-    light.color.set(color)
-  }, [enabled, intensity, color])
-
-  // volitelný helper (pro debug: ať je vidět, že světlo u kamery existuje)
-  useEffect(() => {
-    const light = lightRef.current
-    if (!light) return
-    if (showHelper) {
-      const helper = new THREE.PointLightHelper(light, 5)
-      camera.add(helper)
-      helperRef.current = helper
-      return () => {
-        camera.remove(helper)
-        helper.dispose?.()
-        helperRef.current = null
-      }
-    } else {
-      if (helperRef.current) {
-        camera.remove(helperRef.current)
-        helperRef.current.dispose?.()
-        helperRef.current = null
-      }
-    }
-  }, [showHelper, camera])
-
-  return null
+  return (
+    <pointLight
+      ref={lightRef}
+      color={color}
+      intensity={enabled ? intensity : 0}
+      distance={0}
+      decay={0}
+    />
+  )
 }
 
 /* ---------- Trackball ---------- */
@@ -460,8 +440,9 @@ export default function ClientPage() {
   const [lightPos4, setLightPos4] = useState({ x: 0, y: -5, z: -5 })
   const [showLights, setShowLights] = useState(false)
   const [headlightOn, setHeadlightOn] = useState(true)
-  const [headlightIntensity, setHeadlightIntensity] = useState(1.6)
+  const [headlightIntensity, setHeadlightIntensity] = useState(2.0)
   const [headlightHelper, setHeadlightHelper] = useState(false)
+  const fillDim = headlightOn ? 0.5 : 1
 
   const [uiReady, setUiReady] = useState(false)
   useEffect(() => { const id = requestAnimationFrame(() => setUiReady(true)); return () => cancelAnimationFrame(id) }, [])
@@ -823,15 +804,15 @@ export default function ClientPage() {
       >
         {!fatal && (
           <>
-            <ambientLight intensity={lightIntensity * 0.4} />
+            <ambientLight intensity={lightIntensity * 0.4 * fillDim} />
             {/* HEADLIGHT přichycený ke kameře (PointLight) */}
             <Headlight enabled={headlightOn} intensity={headlightIntensity} color="#ffffff" showHelper={headlightHelper} />
 
             {/* existující fill/key světla */}
-            <directionalLight position={[lightPos1.x, lightPos1.y, lightPos1.z]} intensity={lightIntensity * 1.5} />
-            <directionalLight position={[lightPos2.x, lightPos2.y, lightPos2.z]} intensity={lightIntensity * 1.0} />
-            <directionalLight position={[lightPos3.x, lightPos3.y, lightPos3.z]} intensity={lightIntensity * 1.2} />
-            <directionalLight position={[lightPos4.x, lightPos4.y, lightPos4.z]} intensity={lightIntensity * 0.8} />
+            <directionalLight position={[lightPos1.x, lightPos1.y, lightPos1.z]} intensity={lightIntensity * 1.5 * fillDim} />
+            <directionalLight position={[lightPos2.x, lightPos2.y, lightPos2.z]} intensity={lightIntensity * 1.0 * fillDim} />
+            <directionalLight position={[lightPos3.x, lightPos3.y, lightPos3.z]} intensity={lightIntensity * 1.2 * fillDim} />
+            <directionalLight position={[lightPos4.x, lightPos4.y, lightPos4.z]} intensity={lightIntensity * 0.8 * fillDim} />
 
             <group ref={rootRef}>
               <Suspense fallback={null}>
