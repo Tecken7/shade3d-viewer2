@@ -215,8 +215,7 @@ function AnyModel({
       }
     })()
     return () => { cancelled = true }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [url, ext])
+  }, [url, ext]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // AutoSmooth re-aplikace při změně
   useEffect(() => {
@@ -375,53 +374,70 @@ function AutoCenterAndFrame({
 }
 
 /* ---------- EnvLoader (HDRI prostředí) ---------- */
-function EnvLoader({ hdriUrl, envTexRef }) {
+function EnvLoader({ hdriUrl, envTexRef, onError }) {
   const { scene, gl } = useThree()
   useEffect(() => {
     let disposed = false
+
     // žádné prostředí
     if (!hdriUrl) {
-      if (scene.environment) scene.environment.dispose?.()
+      try { scene.environment?.dispose?.() } catch {}
       scene.environment = null
       return
     }
 
-    const loader = new RGBELoader()
-    loader.setDataType(THREE.UnsignedByteType)
+    try {
+      const loader = new RGBELoader()
+      // HalfFloat bývá nejbezpečnější napříč prohlížeči
+      loader.setDataType(THREE.HalfFloatType)
 
-    const pmrem = new THREE.PMREMGenerator(gl)
-    pmrem.compileEquirectangularShader()
+      const pmrem = new THREE.PMREMGenerator(gl)
+      pmrem.compileEquirectangularShader()
 
-    loader.load(hdriUrl, (hdr) => {
-      if (disposed) { hdr?.dispose?.(); return }
-      const envTex = pmrem.fromEquirectangular(hdr).texture
-      hdr.dispose()
+      loader.load(
+        hdriUrl,
+        (hdr) => {
+          if (disposed) { hdr?.dispose?.(); return }
+          let envTex = null
+          try {
+            envTex = pmrem.fromEquirectangular(hdr).texture
+          } catch (e) {
+            onError?.(e)
+          } finally {
+            hdr?.dispose?.()
+            pmrem.dispose()
+          }
+          if (!envTex) return
 
-      // uklid starého
-      if (envTexRef.current && envTexRef.current !== envTex) {
-        envTexRef.current.dispose?.()
-      }
-      envTexRef.current = envTex
-      scene.environment = envTex
-    })
+          try { envTexRef.current?.dispose?.() } catch {}
+          envTexRef.current = envTex
+          scene.environment = envTex
+        },
+        undefined,
+        (err) => {
+          pmrem.dispose()
+          onError?.(err)
+          // fallback: žádné prostředí
+          try { scene.environment?.dispose?.() } catch {}
+          scene.environment = null
+        }
+      )
 
-    return () => {
-      disposed = true
-      pmrem.dispose()
+      return () => { disposed = true; pmrem.dispose() }
+    } catch (e) {
+      onError?.(e)
+      try { scene.environment?.dispose?.() } catch {}
+      scene.environment = null
     }
-  }, [hdriUrl, scene, gl, envTexRef])
+  }, [hdriUrl, scene, gl, envTexRef, onError])
   return null
 }
 
 /* ---------- ClientPage (Viewer) ---------- */
 
-// HDRI presety – máš nahrané studio_small_03_1k.hdr v /public/hdr/
 const HDRI_PRESETS = {
   none: null,
   studioSoft: "/hdr/studio_small_03_1k.hdr",
-  // přidej další soubory do /public/hdr a sem jen doplň klíč
-  // grayRoom: "/hdr/studio_small_08_1k.hdr",
-  // overcast: "/hdr/overcast_park_1k.hdr",
 }
 
 export default function ClientPage() {
@@ -434,10 +450,7 @@ export default function ClientPage() {
   const [showLights, setShowLights] = useState(false)
 
   const [uiReady, setUiReady] = useState(false)
-  useEffect(() => {
-    const id = requestAnimationFrame(() => setUiReady(true))
-    return () => cancelAnimationFrame(id)
-  }, [])
+  useEffect(() => { const id = requestAnimationFrame(() => setUiReady(true)); return () => cancelAnimationFrame(id) }, [])
 
   const [isMobile, setIsMobile] = useState(false)
   useEffect(() => {
@@ -450,13 +463,14 @@ export default function ClientPage() {
   const [title, setTitle] = useState(null)
 
   // modely
-  const [files, setFiles] = useState([]) // {url,name,rawName,c,o,v,r,m,vc,km}
+  const [files, setFiles] = useState([])
   const [colors, setColors] = useState([])
   const [opacities, setOpacities] = useState([])
   const [visibles, setVisibles] = useState([])
   const [roughnesses, setRoughnesses] = useState([])
   const [metalnesses, setMetalnesses] = useState([])
   const [fatal, setFatal] = useState(null)
+  const [envError, setEnvError] = useState(null)
 
   // auto smooth
   const [autoSmooth, setAutoSmooth] = useState((getParam("smooth") ?? "1") !== "0")
@@ -575,8 +589,7 @@ export default function ClientPage() {
         setFatal("Tento náhled není dostupný (chyba při načtení dat).")
       }
     })()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   // LOGO
   const logoEl = logoCfg.url && (
@@ -625,110 +638,51 @@ export default function ClientPage() {
           <div style={{ color: "#ff8b8b" }}>{fatal}</div>
         ) : (
           <>
+            {/* ENV error toast (když selže HDRI, nespadne celá appka) */}
+            {envError && (
+              <div style={{ marginBottom: 8, padding: "8px 10px", borderRadius: 6, background: "rgba(255,0,0,.15)", border: "1px solid rgba(255,0,0,.35)" }}>
+                Prostředí (HDRI) se nepodařilo načíst. Pokračuji bez něj.
+              </div>
+            )}
+
             {files.map((f, i) => (
-              <div
-                key={i}
-                className="control-row"
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "36px 1fr 26px",
-                  alignItems: "center",
-                  columnGap: 6,
-                  rowGap: 6,
-                  margin: "6px 0",
-                }}
-              >
-                {/* Label */}
-                <div
-                  className="row-label"
-                  style={{ gridColumn: "1 / -1", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
-                  title={f.rawName || f.name}
-                >
+              <div key={i} className="control-row" style={{ display: "grid", gridTemplateColumns: "36px 1fr 26px", alignItems: "center", columnGap: 6, rowGap: 6, margin: "6px 0" }}>
+                <div className="row-label" style={{ gridColumn: "1 / -1", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={f.rawName || f.name}>
                   {stripExt(f.name)}:
                 </div>
-
-                {/* Swatch */}
                 <div className="row-swatch">
-                  <ColorSwatch
-                    color={colors[i] ?? "#ffffff"}
-                    onChange={(c) => setColors((prev) => prev.map((v, idx) => (idx === i ? c : v)))}
-                    ariaLabel={`${f.name} color`}
-                  />
+                  <ColorSwatch color={colors[i] ?? "#ffffff"} onChange={(c) => setColors((prev) => prev.map((v, idx) => (idx === i ? c : v)))} ariaLabel={`${f.name} color`} />
                 </div>
-
-                {/* Slider – Opacity */}
                 <div className="row-slider" style={{ minWidth: 0 }}>
-                  <input
-                    className="slider"
-                    type="range"
-                    min={0} max={1} step={0.01}
-                    value={opacities[i] ?? 1}
-                    onChange={(e) => {
-                      const v = parseFloat(e.target.value)
-                      setOpacities((prev) => prev.map((x, idx) => (idx === i ? v : x)))
-                    }}
-                    style={{ width: "calc(100% - 18px)", minWidth: 140 }}
-                    aria-label={`${f.name} opacity`}
-                  />
+                  <input className="slider" type="range" min={0} max={1} step={0.01} value={opacities[i] ?? 1}
+                    onChange={(e) => { const v = parseFloat(e.target.value); setOpacities((prev) => prev.map((x, idx) => (idx === i ? v : x))) }}
+                    style={{ width: "calc(100% - 18px)", minWidth: 140 }} aria-label={`${f.name} opacity`} />
                 </div>
-
-                {/* Eye */}
-                <button
-                  className={`toggle icon-btn ${visibles[i] ? "is-on" : "is-off"}`}
-                  onClick={() => setVisibles((prev) => prev.map((v, idx) => (idx === i ? !v : v)))}
-                  aria-label={visibles[i] ? `Hide ${f.name}` : `Show ${f.name}`}
-                  style={{
-                    position: "relative", width: 26, height: 22, padding: 0,
-                    display: "inline-flex", alignItems: "center", justifyContent: "center",
-                    overflow: "hidden", background: "transparent",
-                    border: "1px solid white", borderRadius: 6, color: "white", cursor: "pointer",
-                  }}
-                >
+                <button className={`toggle icon-btn ${visibles[i] ? "is-on" : "is-off"}`} onClick={() => setVisibles((prev) => prev.map((v, idx) => (idx === i ? !v : v)))} aria-label={visibles[i] ? `Hide ${f.name}` : `Show ${f.name}`}
+                  style={{ position: "relative", width: 26, height: 22, padding: 0, display: "inline-flex", alignItems: "center", justifyContent: "center", overflow: "hidden", background: "transparent", border: "1px solid white", borderRadius: 6, color: "white", cursor: "pointer" }}>
                   <img src={ICONS.eye} alt="" width="18" height="18" style={{ position: "absolute", inset: 0, width: 18, height: 18, margin: "auto", opacity: visibles[i] ? 1 : 0, transition: "opacity .06s linear" }} />
                   <img src={ICONS.eyeOff} alt="" width="18" height="18" style={{ position: "absolute", inset: 0, width: 18, height: 18, margin: "auto", opacity: visibles[i] ? 0 : 1, transition: "opacity .06s linear" }} />
                 </button>
-
-                {/* Druhý řádek: Roughness + Metalness */}
                 <div style={{ gridColumn: "1 / -1", display: "grid", gridTemplateColumns: "auto 1fr auto 1fr", columnGap: 8, alignItems: "center" }}>
                   <span style={{ fontSize: 12, opacity: 0.85 }}>R:</span>
-                  <input
-                    className="slider"
-                    type="range"
-                    min={0} max={1} step={0.01}
+                  <input className="slider" type="range" min={0} max={1} step={0.01}
                     value={roughnesses[i] ?? (typeof f.r === "number" ? f.r : 0.5)}
-                    onChange={(e) => {
-                      const v = clamp01(parseFloat(e.target.value))
-                      setRoughnesses((prev) => prev.map((x, idx) => (idx === i ? v : (typeof x === "number" ? x : (idx === i ? v : 0.5)))))
-                    }}
-                    style={{ width: "100%", minWidth: 120 }}
-                    aria-label={`${f.name} roughness`}
-                  />
+                    onChange={(e) => { const v = clamp01(parseFloat(e.target.value)); setRoughnesses((prev) => prev.map((x, idx) => (idx === i ? v : (typeof x === "number" ? x : (idx === i ? v : 0.5))))) }}
+                    style={{ width: "100%", minWidth: 120 }} aria-label={`${f.name} roughness`} />
                   <span style={{ fontSize: 12, opacity: 0.85 }}>M:</span>
-                  <input
-                    className="slider"
-                    type="range"
-                    min={0} max={1} step={0.01}
+                  <input className="slider" type="range" min={0} max={1} step={0.01}
                     value={metalnesses[i] ?? (typeof f.m === "number" ? f.m : 0.5)}
-                    onChange={(e) => {
-                      const v = clamp01(parseFloat(e.target.value))
-                      setMetalnesses((prev) => prev.map((x, idx) => (idx === i ? v : (typeof x === "number" ? x : (idx === i ? v : 0.5)))))
-                    }}
-                    style={{ width: "100%", minWidth: 120 }}
-                    aria-label={`${f.name} metalness`}
-                  />
+                    onChange={(e) => { const v = clamp01(parseFloat(e.target.value)); setMetalnesses((prev) => prev.map((x, idx) => (idx === i ? v : (typeof x === "number" ? x : (idx === i ? v : 0.5))))) }}
+                    style={{ width: "100%", minWidth: 120 }} aria-label={`${f.name} metalness`} />
                 </div>
               </div>
             ))}
 
-            {/* Světla + Titulek + AutoSmooth + HDRI preset */}
+            {/* Světla + Titulek + AutoSmooth + HDRI */}
             <div style={{ display: "grid", gridTemplateColumns: "auto 1fr", alignItems: "center", gap: 8, marginTop: 8 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                <button
-                  className={`toggle arrow-toggle ${showLights ? "is-open" : "is-closed"}`}
-                  onClick={() => setShowLights(!showLights)}
-                  aria-label="Toggle lights panel"
-                  style={{ display: "inline-flex", alignItems: "center", gap: 8, padding: "6px 10px", border: "1px solid white", borderRadius: 6, background: "transparent", color: "white", cursor: "pointer" }}
-                >
+                <button className={`toggle arrow-toggle ${showLights ? "is-open" : "is-closed"}`} onClick={() => setShowLights(!showLights)} aria-label="Toggle lights panel"
+                  style={{ display: "inline-flex", alignItems: "center", gap: 8, padding: "6px 10px", border: "1px solid white", borderRadius: 6, background: "transparent", color: "white", cursor: "pointer" }}>
                   <span className="arrow-stack" aria-hidden style={{ position: "relative", width: 16, height: 16, display: "inline-block" }}>
                     <img src={ICONS.arrowClosed} width="16" height="16" style={{ position: "absolute", left: 0, top: 0, opacity: showLights ? 0 : 1 }} alt="" />
                     <img src={ICONS.arrowOpen} width="16" height="16" style={{ position: "absolute", left: 0, top: 0, opacity: showLights ? 1 : 0 }} alt="" />
@@ -737,43 +691,17 @@ export default function ClientPage() {
                 </button>
 
                 {title && (
-                  <div
-                    title={title}
-                    style={{
-                      maxWidth: 220,
-                      padding: "6px 10px",
-                      borderRadius: 8,
-                      border: "1px solid rgba(255,255,255,.18)",
-                      background: "rgba(255,255,255,.08)",
-                      fontSize: 13,
-                      fontWeight: 600,
-                      whiteSpace: "nowrap",
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                    }}
-                  >
+                  <div title={title} style={{ maxWidth: 220, padding: "6px 10px", borderRadius: 8, border: "1px solid rgba(255,255,255,.18)", background: "rgba(255,255,255,.08)", fontSize: 13, fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                     {title}
                   </div>
                 )}
 
-                {/* HDRI preset select */}
                 <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
                   <span style={{ opacity: .9 }}>Prostředí:</span>
-                  <select
-                    value={hdriKey}
-                    onChange={(e) => setHdriKey(e.target.value)}
-                    style={{
-                      background: "rgba(255,255,255,.08)",
-                      color: "#fff",
-                      border: "1px solid rgba(255,255,255,.2)",
-                      borderRadius: 6,
-                      padding: "4px 8px",
-                    }}
-                  >
+                  <select value={hdriKey} onChange={(e) => setHdriKey(e.target.value)}
+                    style={{ background: "rgba(255,255,255,.08)", color: "#fff", border: "1px solid rgba(255,255,255,.2)", borderRadius: 6, padding: "4px 8px" }}>
                     <option value="none">Žádné</option>
                     <option value="studioSoft">Studio – soft</option>
-                    {/* <option value="grayRoom">Studio – gray room</option>
-                    <option value="overcast">Overcast</option> */}
                   </select>
                 </label>
               </div>
@@ -787,47 +715,6 @@ export default function ClientPage() {
                 <input className="slider" type="range" min={0} max={80} step={1} value={smoothAngle} onChange={(e) => setSmoothAngle(parseFloat(e.target.value))} style={{ width: 120 }} />
               </div>
             </div>
-
-            {showLights && (
-              <div className="lights-wrap" style={{ marginTop: 6 }}>
-                <div className="lights-row" style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
-                  <img src={ICONS.bulb} alt="" width="16" height="16" style={{ width: 16, height: 16 }} />
-                  <span>Light Intensity</span>
-                </div>
-                <div className="axis-row" style={{ display: "flex", alignItems: "center", gap: 8, margin: "4px 0" }}>
-                  <span className="axis-label" aria-hidden="true" style={{ width: 18, textAlign: "right", color: "#fff", opacity: 0.9 }}>&nbsp;</span>
-                  <input className="slider" type="range" min={0} max={2} step={0.01} value={lightIntensity} onChange={(e) => setLightIntensity(parseFloat(e.target.value))} style={{ flex: "1 1 auto", width: "100%", minWidth: 140 }} />
-                </div>
-                {[
-                  { label: "Light 1 Position", pos: lightPos1, setPos: setLightPos1 },
-                  { label: "Light 2 Position", pos: lightPos2, setPos: setLightPos2 },
-                  { label: "Light 3 Position", pos: lightPos3, setPos: setLightPos3 },
-                  { label: "Light 4 Position", pos: lightPos4, setPos: setLightPos4 },
-                ].map((light, idx) => (
-                  <div key={idx} className="light-block" style={{ marginTop: 8 }}>
-                    <div className="lights-row" style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
-                      <img src={ICONS.flashlight} alt="" width="16" height="16" style={{ width: 16, height: 16 }} />
-                      <span>{light.label}</span>
-                    </div>
-                    {["x", "y", "z"].map((axis) => (
-                      <div key={axis} className="axis-row" style={{ display: "flex", alignItems: "center", gap: 8, margin: "4px 0" }}>
-                        <span className="axis-label" style={{ width: 18, textAlign: "right", color: "#fff", opacity: 0.9 }}>{axis.toUpperCase()}:</span>
-                        <input
-                          className="slider"
-                          type="range"
-                          min={-10}
-                          max={10}
-                          step={0.1}
-                          value={light.pos[axis]}
-                          onChange={(e) => light.setPos({ ...light.pos, [axis]: parseFloat(e.target.value) })}
-                          style={{ flex: "1 1 auto", width: "100%", minWidth: 140 }}
-                        />
-                      </div>
-                    ))}
-                  </div>
-                ))}
-              </div>
-            )}
           </>
         )}
       </div>
@@ -839,11 +726,11 @@ export default function ClientPage() {
         gl={{ alpha: true }}
         onCreated={({ gl }) => {
           gl.setClearAlpha(0)
-          // three r154+ => outputColorSpace; starší three => outputEncoding (číslo 3001 = původní sRGBEncoding)
           if ("outputColorSpace" in gl) {
             gl.outputColorSpace = THREE.SRGBColorSpace
           } else if ("outputEncoding" in gl) {
-            // @ts-ignore – zachová kompatibilitu se starší three
+            // fallback na starší three (3001 = sRGBEncoding)
+            // @ts-ignore
             gl.outputEncoding = 3001
           }
           gl.toneMapping = THREE.ACESFilmicToneMapping
@@ -851,8 +738,12 @@ export default function ClientPage() {
         }}
         style={{ position: "absolute", inset: 0, zIndex: 1, background: "transparent" }}
       >
-        {/* HDRI prostředí */}
-        <EnvLoader hdriUrl={HDRI_PRESETS[hdriKey]} envTexRef={envTexRef} />
+        {/* HDRI prostředí – když selže, jen vypneme env */}
+        <EnvLoader
+          hdriUrl={HDRI_PRESETS[hdriKey]}
+          envTexRef={envTexRef}
+          onError={(e) => { console.error("HDRI load failed:", e); setEnvError(true); }}
+        />
 
         {!fatal && (
           <>
@@ -908,12 +799,7 @@ export default function ClientPage() {
         .slider::-moz-range-thumb { width: 14px; height: 14px; border-radius: 50%; background: white; cursor: pointer; box-shadow: 0 0 2px black; border: none; }
 
         @media (max-width: 720px) {
-          .controls-panel {
-            left: 8px !important;
-            right: 8px;
-            width: auto !important;
-            max-width: calc(100vw - 16px) !important;
-          }
+          .controls-panel { left: 8px !important; right: 8px; width: auto !important; max-width: calc(100vw - 16px) !important; }
         }
       `}</style>
     </div>
