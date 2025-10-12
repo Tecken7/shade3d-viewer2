@@ -268,16 +268,15 @@ function AnyModel({
 }
 
 /* ---------- Headlight (PointLight přichycený ke kameře) ---------- */
-function Headlight({ enabled = true, intensity = 1, color = "#ffffff" }) {
+function Headlight({ enabled = true, intensity = 1, color = "#ffffff", showHelper = false }) {
   const { camera } = useThree()
   const lightRef = useRef(null)
+  const helperRef = useRef(null)
 
+  // vytvoř světlo JEDNOU a přichyť ho ke kameře; viditelnost/intenzitu řídíme přes props
   useEffect(() => {
-    if (!enabled) return
-
-    // distance=0 => nekonečný dosah, decay=0 => bez útlumu
-    const light = new THREE.PointLight(color, intensity, 0, 0)
-    light.position.set(0, 0, 0) // relativně ke kameře
+    const light = new THREE.PointLight(color, intensity, 0, 0) // distance=0, decay=0
+    light.position.set(0, 0, 0)
     camera.add(light)
     lightRef.current = light
 
@@ -285,14 +284,38 @@ function Headlight({ enabled = true, intensity = 1, color = "#ffffff" }) {
       camera.remove(light)
       lightRef.current = null
     }
-  }, [camera, enabled])
+  }, [camera])
 
+  // props → runtime aktualizace
   useEffect(() => {
-    if (lightRef.current) {
-      lightRef.current.intensity = intensity
-      lightRef.current.color.set(color)
+    const light = lightRef.current
+    if (!light) return
+    light.visible = !!enabled
+    light.intensity = intensity
+    light.color.set(color)
+  }, [enabled, intensity, color])
+
+  // volitelný helper (pro debug: ať je vidět, že světlo u kamery existuje)
+  useEffect(() => {
+    const light = lightRef.current
+    if (!light) return
+    if (showHelper) {
+      const helper = new THREE.PointLightHelper(light, 5)
+      camera.add(helper)
+      helperRef.current = helper
+      return () => {
+        camera.remove(helper)
+        helper.dispose?.()
+        helperRef.current = null
+      }
+    } else {
+      if (helperRef.current) {
+        camera.remove(helperRef.current)
+        helperRef.current.dispose?.()
+        helperRef.current = null
+      }
     }
-  }, [intensity, color])
+  }, [showHelper, camera])
 
   return null
 }
@@ -437,7 +460,8 @@ export default function ClientPage() {
   const [lightPos4, setLightPos4] = useState({ x: 0, y: -5, z: -5 })
   const [showLights, setShowLights] = useState(false)
   const [headlightOn, setHeadlightOn] = useState(true)
-  const [headlightIntensity, setHeadlightIntensity] = useState(1.0)
+  const [headlightIntensity, setHeadlightIntensity] = useState(1.6)
+  const [headlightHelper, setHeadlightHelper] = useState(false)
 
   const [uiReady, setUiReady] = useState(false)
   useEffect(() => { const id = requestAnimationFrame(() => setUiReady(true)); return () => cancelAnimationFrame(id) }, [])
@@ -742,11 +766,15 @@ export default function ClientPage() {
                   <input type="checkbox" checked={headlightOn} onChange={(e) => setHeadlightOn(e.target.checked)} />
                   <span>Zapnuto</span>
                 </label>
+                <label style={{ display: "inline-flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
+                  <input type="checkbox" checked={headlightHelper} onChange={(e) => setHeadlightHelper(e.target.checked)} />
+                  <span>Helper</span>
+                </label>
               </div>
               <div className="axis-row" style={{ display: "flex", alignItems: "center", gap: 8 }}>
                 <span className="axis-label" aria-hidden="true" style={{ width: 18, textAlign: "right", color: "#fff", opacity: 0.9 }}>I:</span>
-                <input className="slider" type="range" min={0} max={3} step={0.01} value={headlightIntensity} onChange={(e) => setHeadlightIntensity(parseFloat(e.target.value))} style={{ flex: "1 1 auto", width: "100%", minWidth: 140 }} />
-                <span style={{ width: 40, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{headlightIntensity.toFixed(2)}</span>
+                <input className="slider" type="range" min={0} max={5} step={0.01} value={headlightIntensity} onChange={(e) => setHeadlightIntensity(parseFloat(e.target.value))} style={{ flex: "1 1 auto", width: "100%", minWidth: 140 }} />
+                <span style={{ width: 44, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{headlightIntensity.toFixed(2)}</span>
               </div>
             </div>
 
@@ -797,7 +825,7 @@ export default function ClientPage() {
           <>
             <ambientLight intensity={lightIntensity * 0.4} />
             {/* HEADLIGHT přichycený ke kameře (PointLight) */}
-            <Headlight enabled={headlightOn} intensity={headlightIntensity} color="#ffffff" />
+            <Headlight enabled={headlightOn} intensity={headlightIntensity} color="#ffffff" showHelper={headlightHelper} />
 
             {/* existující fill/key světla */}
             <directionalLight position={[lightPos1.x, lightPos1.y, lightPos1.z]} intensity={lightIntensity * 1.5} />
