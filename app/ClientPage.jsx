@@ -267,6 +267,36 @@ function AnyModel({
   return visible ? <primitive object={object3D} /> : null
 }
 
+/* ---------- Headlight (PointLight přichycený ke kameře) ---------- */
+function Headlight({ enabled = true, intensity = 1, color = "#ffffff" }) {
+  const { camera } = useThree()
+  const lightRef = useRef(null)
+
+  useEffect(() => {
+    if (!enabled) return
+
+    // distance=0 => nekonečný dosah, decay=0 => bez útlumu
+    const light = new THREE.PointLight(color, intensity, 0, 0)
+    light.position.set(0, 0, 0) // relativně ke kameře
+    camera.add(light)
+    lightRef.current = light
+
+    return () => {
+      camera.remove(light)
+      lightRef.current = null
+    }
+  }, [camera, enabled])
+
+  useEffect(() => {
+    if (lightRef.current) {
+      lightRef.current.intensity = intensity
+      lightRef.current.color.set(color)
+    }
+  }, [intensity, color])
+
+  return null
+}
+
 /* ---------- Trackball ---------- */
 function TouchTrackballControls({ target = [0, 0, 0] }) {
   const { camera, gl } = useThree()
@@ -406,6 +436,8 @@ export default function ClientPage() {
   const [lightPos3, setLightPos3] = useState({ x: 10, y: 0, z: 0 })
   const [lightPos4, setLightPos4] = useState({ x: 0, y: -5, z: -5 })
   const [showLights, setShowLights] = useState(false)
+  const [headlightOn, setHeadlightOn] = useState(true)
+  const [headlightIntensity, setHeadlightIntensity] = useState(1.0)
 
   const [uiReady, setUiReady] = useState(false)
   useEffect(() => { const id = requestAnimationFrame(() => setUiReady(true)); return () => cancelAnimationFrame(id) }, [])
@@ -701,6 +733,23 @@ export default function ClientPage() {
               </div>
             </div>
 
+            {/* Headlight (kamera) – přepínač + intenzita */}
+            <div className="headlight-controls" style={{ marginTop: 8 }}>
+              <div className="lights-row" style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6, flexWrap: "wrap" }}>
+                <img src={ICONS.flashlight} alt="" width="16" height="16" style={{ width: 16, height: 16 }} />
+                <strong style={{ fontSize: 13 }}>Baterka (kamera)</strong>
+                <label style={{ display: "inline-flex", alignItems: "center", gap: 6, cursor: "pointer", marginLeft: "auto" }}>
+                  <input type="checkbox" checked={headlightOn} onChange={(e) => setHeadlightOn(e.target.checked)} />
+                  <span>Zapnuto</span>
+                </label>
+              </div>
+              <div className="axis-row" style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <span className="axis-label" aria-hidden="true" style={{ width: 18, textAlign: "right", color: "#fff", opacity: 0.9 }}>I:</span>
+                <input className="slider" type="range" min={0} max={3} step={0.01} value={headlightIntensity} onChange={(e) => setHeadlightIntensity(parseFloat(e.target.value))} style={{ flex: "1 1 auto", width: "100%", minWidth: 140 }} />
+                <span style={{ width: 40, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{headlightIntensity.toFixed(2)}</span>
+              </div>
+            </div>
+
             {showLights && (
               <div className="lights-wrap" style={{ marginTop: 6 }}>
                 <div className="lights-row" style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
@@ -747,6 +796,10 @@ export default function ClientPage() {
         {!fatal && (
           <>
             <ambientLight intensity={lightIntensity * 0.4} />
+            {/* HEADLIGHT přichycený ke kameře (PointLight) */}
+            <Headlight enabled={headlightOn} intensity={headlightIntensity} color="#ffffff" />
+
+            {/* existující fill/key světla */}
             <directionalLight position={[lightPos1.x, lightPos1.y, lightPos1.z]} intensity={lightIntensity * 1.5} />
             <directionalLight position={[lightPos2.x, lightPos2.y, lightPos2.z]} intensity={lightIntensity * 1.0} />
             <directionalLight position={[lightPos3.x, lightPos3.y, lightPos3.z]} intensity={lightIntensity * 1.2} />
