@@ -783,11 +783,16 @@ export default function ClientPage() {
         gl={{ alpha: true }}
         onCreated={({ gl }) => {
           gl.setClearAlpha(0)
-          // Color management / tone mapping
-          // (pro novější three by bylo gl.outputColorSpace = THREE.SRGBColorSpace; tohle je kompatibilní i se staršími)
-          gl.outputEncoding = THREE.sRGBEncoding
-          gl.toneMapping = THREE.ACESFilmicToneMapping
-          gl.toneMappingExposure = 1.0
+  // three r154+ používá outputColorSpace, starší verze outputEncoding
+  if ("outputColorSpace" in gl) {
+    // novější three
+    gl.outputColorSpace = THREE.SRGBColorSpace
+  } else if ("outputEncoding" in gl) {
+    // starší three
+    gl.outputEncoding = THREE.sRGBEncoding
+  }
+  gl.toneMapping = THREE.ACESFilmicToneMapping
+  gl.toneMappingExposure = 1.0
         }}
         style={{ position: "absolute", inset: 0, zIndex: 1, background: "transparent" }}
       >
@@ -859,3 +864,4 @@ export default function ClientPage() {
     </div>
   )
 }
+
