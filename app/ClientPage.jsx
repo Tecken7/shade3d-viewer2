@@ -47,6 +47,40 @@ function inferExt(nameOrUrl) {
   return m ? m[1].toLowerCase() : ""
 }
 
+/* ---------- Runtime “airbag” (zobrazí detail chyby) ---------- */
+function GlobalErrorCatcher() {
+  const [err, setErr] = useState(null)
+  useEffect(() => {
+    const onErr = (e) => {
+      const msg = e?.reason?.message || e?.message || String(e?.reason || e)
+      console.error("Runtime error:", e)
+      setErr(msg || "Unknown runtime error")
+    }
+    window.addEventListener("error", onErr)
+    window.addEventListener("unhandledrejection", onErr)
+    return () => {
+      window.removeEventListener("error", onErr)
+      window.removeEventListener("unhandledrejection", onErr)
+    }
+  }, [])
+  if (!err) return null
+  return (
+    <div style={{
+      position:"fixed", top:10, right:10, zIndex:9999,
+      background:"rgba(180,0,0,.9)", color:"#fff",
+      padding:"10px 12px", borderRadius:8, maxWidth:480,
+      border:"1px solid rgba(255,255,255,.25)", fontFamily:"monospace",
+      boxShadow:"0 6px 18px rgba(0,0,0,.4)"
+    }}>
+      <div style={{fontWeight:700, marginBottom:6}}>Client error</div>
+      <div style={{whiteSpace:"pre-wrap"}}>{err}</div>
+      <div style={{opacity:.8, marginTop:6, fontSize:12}}>
+        (zkontroluj taky Network panel pro 404/CORS u manifestu, modelů, HDRI)
+      </div>
+    </div>
+  )
+}
+
 /* ---------- Auto Smooth ---------- */
 function autoSmoothGeometry(geometry, angleDeg = 30) {
   const angle = Math.max(0, Math.min(89.9, angleDeg))
@@ -113,16 +147,7 @@ function autoSmoothGeometry(geometry, angleDeg = 30) {
 function InlineLoader({ text }) {
   return (
     <Html center>
-      <div
-        style={{
-          background: "rgba(0,0,0,0.7)",
-          padding: "16px 28px",
-          borderRadius: 10,
-          color: "white",
-          fontFamily: "sans-serif",
-          fontSize: 16,
-        }}
-      >
+      <div style={{ background: "rgba(0,0,0,0.7)", padding: "16px 28px", borderRadius: 10, color: "white", fontFamily: "sans-serif", fontSize: 16 }}>
         ⏳ {text || "Načítám…"}
       </div>
     </Html>
@@ -217,7 +242,6 @@ function AnyModel({
     return () => { cancelled = true }
   }, [url, ext]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // AutoSmooth re-aplikace při změně
   useEffect(() => {
     if (!object3D) return
     object3D.traverse((child) => {
@@ -240,7 +264,6 @@ function AnyModel({
     })
   }, [object3D, autoSmooth, smoothAngle])
 
-  // Materiál a vzhled – respektuje VC/keepMaterials
   useEffect(() => {
     if (!object3D) return
     object3D.traverse((child) => {
@@ -379,7 +402,6 @@ function EnvLoader({ hdriUrl, envTexRef, onError }) {
   useEffect(() => {
     let disposed = false
 
-    // žádné prostředí
     if (!hdriUrl) {
       try { scene.environment?.dispose?.() } catch {}
       scene.environment = null
@@ -388,7 +410,6 @@ function EnvLoader({ hdriUrl, envTexRef, onError }) {
 
     try {
       const loader = new RGBELoader()
-      // HalfFloat bývá nejbezpečnější napříč prohlížeči
       loader.setDataType(THREE.HalfFloatType)
 
       const pmrem = new THREE.PMREMGenerator(gl)
@@ -417,7 +438,6 @@ function EnvLoader({ hdriUrl, envTexRef, onError }) {
         (err) => {
           pmrem.dispose()
           onError?.(err)
-          // fallback: žádné prostředí
           try { scene.environment?.dispose?.() } catch {}
           scene.environment = null
         }
@@ -479,8 +499,8 @@ export default function ClientPage() {
     return isFinite(v) ? Math.max(0, Math.min(80, v)) : 30
   })
 
-  // HDRI
-  const [hdriKey, setHdriKey] = useState(getParam("env") || "studioSoft")
+  // HDRI – výchozí vypnuto
+  const [hdriKey, setHdriKey] = useState(getParam("env") || "none")
   const envTexRef = useRef(null)
 
   const [logoCfg, setLogoCfg] = useState({ url: DEFAULT_LOGO, opacity: 0.9, width: 160, pos: "bc" })
@@ -500,34 +520,30 @@ export default function ClientPage() {
         if (manifestUrl) {
           const m = await fetchJSON(manifestUrl)
           const Fs = (m?.files || []).map((x, i) => ({
-            url: x.u,
-            name: stripExt(x.n) || `Model ${i + 1}`,
-            rawName: x.n,
-            c: x.c,
-            o: typeof x.o === "number" ? x.o : 1,
+            url: x.u, name: stripExt(x.n) || `Model ${i + 1}`, rawName: x.n,
+            c: x.c, o: typeof x.o === "number" ? x.o : 1,
             v: typeof x.v === "boolean" ? x.v : true,
             r: typeof x.r === "number" ? x.r : 0.5,
             m: typeof x.m === "number" ? x.m : 0.5,
-            vc: !!x.vc,
-            km: !!x.km,
+            vc: !!x.vc, km: !!x.km,
           }))
           if (!Fs.length) throw new Error("Manifest je prázdný.")
           setFiles(Fs)
-          const palette = ["#f5f5dc", "#8e8e8e", "#ffffff", "#ffd7a8", "#c0c0c0", "#e6f0ff", "#ffeedd"]
-          setColors(Fs.map((f, i) => f.c || palette[i % palette.length]))
-          setOpacities(Fs.map((f) => (typeof f.o === "number" ? clamp01(f.o) : 1)))
-          setVisibles(Fs.map((f) => (typeof f.v === "boolean" ? f.v : true)))
-          setRoughnesses(Fs.map((f) => (typeof f.r === "number" ? clamp01(f.r) : 0.5)))
-          setMetalnesses(Fs.map((f) => (typeof f.m === "number" ? clamp01(f.m) : 0.5)))
-          setTitle(typeof m?.title === "string" ? m.title : (getParam("title") ?? null))
-          const envKey = (m?.env && HDRI_PRESETS[m.env] !== undefined) ? m.env : (getParam("env") || hdriKey)
+          const palette = ["#f5f5dc","#8e8e8e","#ffffff","#ffd7a8","#c0c0c0","#e6f0ff","#ffeedd"]
+          setColors(Fs.map((f,i)=> f.c || palette[i%palette.length]))
+          setOpacities(Fs.map((f)=> typeof f.o==="number" ? clamp01(f.o) : 1))
+          setVisibles(Fs.map((f)=> typeof f.v==="boolean" ? f.v : true))
+          setRoughnesses(Fs.map((f)=> typeof f.r==="number" ? clamp01(f.r) : 0.5))
+          setMetalnesses(Fs.map((f)=> typeof f.m==="number" ? clamp01(f.m) : 0.5))
+          setTitle(typeof m?.title==="string" ? m.title : (getParam("title") ?? null))
+          const envKey = (m?.env && HDRI_PRESETS[m.env]!==undefined) ? m.env : (getParam("env") || hdriKey)
           setHdriKey(envKey)
 
           const logoUrl = m?.logo?.url || DEFAULT_LOGO
           setLogoCfg({
             url: logoUrl || null,
             opacity: clamp01(parseFloat(getParam("logoOpacity") ?? "0.9")),
-            width: parseInt(getParam("logoWidth") ?? (window.innerWidth < 768 ? "120" : "160"), 10),
+            width: parseInt(getParam("logoWidth") ?? (window.innerWidth<768 ? "120":"160"),10),
             pos: getParam("logoPos") || "bc",
           })
           return
@@ -539,51 +555,45 @@ export default function ClientPage() {
           try { arr = JSON.parse(f) } catch {}
           if (!arr) { try { arr = JSON.parse(decodeURIComponent(f)) } catch {} }
           if (!Array.isArray(arr)) throw new Error("Neplatný formát parametru ?files=")
-          const Fs = arr.filter((x) => x && x.u).map((x, i) => ({
-            url: x.u,
-            name: stripExt(x.n) || `Model ${i + 1}`,
-            rawName: x.n,
-            c: x.c,
-            o: typeof x.o === "number" ? x.o : 1,
-            v: typeof x.v === "boolean" ? x.v : true,
-            r: typeof x.r === "number" ? x.r : 0.5,
-            m: typeof x.m === "number" ? x.m : 0.5,
-            vc: !!x.vc,
-            km: !!x.km,
+          const Fs = arr.filter((x)=>x && x.u).map((x,i)=>({
+            url:x.u, name: stripExt(x.n) || `Model ${i+1}`, rawName:x.n,
+            c:x.c, o: typeof x.o==="number"?x.o:1, v: typeof x.v==="boolean"?x.v:true,
+            r: typeof x.r==="number"?x.r:0.5, m: typeof x.m==="number"?x.m:0.5,
+            vc: !!x.vc, km: !!x.km,
           }))
           setFiles(Fs)
-          const palette = ["#f5f5dc", "#8e8e8e", "#ffffff", "#ffd7a8", "#c0c0c0", "#e6f0ff", "#ffeedd"]
-          setColors(Fs.map((f, i) => f.c || palette[i % palette.length]))
-          setOpacities(Fs.map((f) => (typeof f.o === "number" ? clamp01(f.o) : 1)))
-          setVisibles(Fs.map((f) => (typeof f.v === "boolean" ? f.v : true)))
-          setRoughnesses(Fs.map((f) => (typeof f.r === "number" ? clamp01(f.r) : 0.5)))
-          setMetalnesses(Fs.map((f) => (typeof f.m === "number" ? clamp01(f.m) : 0.5)))
+          const palette = ["#f5f5dc","#8e8e8e","#ffffff","#ffd7a8","#c0c0c0","#e6f0ff","#ffeedd"]
+          setColors(Fs.map((f,i)=> f.c || palette[i%palette.length]))
+          setOpacities(Fs.map((f)=> typeof f.o==="number" ? clamp01(f.o) : 1))
+          setVisibles(Fs.map((f)=> typeof f.v==="boolean" ? f.v : true))
+          setRoughnesses(Fs.map((f)=> typeof f.r==="number" ? clamp01(f.r) : 0.5))
+          setMetalnesses(Fs.map((f)=> typeof f.m==="number" ? clamp01(f.m) : 0.5))
           setTitle(getParam("title") ?? null)
           const envKey = getParam("env")
           if (envKey && HDRI_PRESETS[envKey] !== undefined) setHdriKey(envKey)
 
           setLogoCfg({
-            url: getParam("logo") === "none" ? null : getParam("logo") || DEFAULT_LOGO,
+            url: getParam("logo")==="none" ? null : getParam("logo") || DEFAULT_LOGO,
             opacity: clamp01(parseFloat(getParam("logoOpacity") ?? "0.9")),
-            width: parseInt(getParam("logoWidth") ?? (window.innerWidth < 768 ? "120" : "160"), 10),
+            width: parseInt(getParam("logoWidth") ?? (window.innerWidth<768 ? "120":"160"),10),
             pos: getParam("logoPos") || "bc",
           })
           return
         }
 
-        // dev fallback
+        // dev fallback (když nepřijde nic)
         const Fs = [
           { url: "/models/Upper.obj", name: "Upper", rawName: "Upper.obj", r: 0.5, m: 0.5, v: true, vc: false, km: false },
           { url: "/models/Lower.stl", name: "Lower", rawName: "Lower.stl", r: 0.5, m: 0.5, v: true, vc: false, km: false },
           { url: "/models/Crown21.ply", name: "Bridge", rawName: "Crown21.ply", r: 0.5, m: 0.5, v: true, vc: false, km: false },
         ]
         setFiles(Fs)
-        const palette = ["#f5f5dc", "#8e8e8e", "#ffffff"]
-        setColors(Fs.map((_, i) => palette[i % palette.length]))
-        setOpacities(Fs.map(() => 1))
-        setVisibles(Fs.map((f) => f.v))
-        setRoughnesses(Fs.map((f) => f.r))
-        setMetalnesses(Fs.map((f) => f.m))
+        const palette = ["#f5f5dc","#8e8e8e","#ffffff"]
+        setColors(Fs.map((_,i)=> palette[i%palette.length]))
+        setOpacities(Fs.map(()=> 1))
+        setVisibles(Fs.map((f)=> f.v))
+        setRoughnesses(Fs.map((f)=> f.r))
+        setMetalnesses(Fs.map((f)=> f.m))
       } catch (e) {
         console.error(e)
         setFatal("Tento náhled není dostupný (chyba při načtení dat).")
@@ -591,7 +601,6 @@ export default function ClientPage() {
     })()
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // LOGO
   const logoEl = logoCfg.url && (
     <img
       src={logoCfg.url}
@@ -612,33 +621,28 @@ export default function ClientPage() {
     />
   )
 
-  // ref na root group v Canvasu
   const rootRef = useRef()
 
   return (
     <div className="stage" style={{ position: "relative", width: "100vw", height: "100vh", background: "black" }}>
+      <GlobalErrorCatcher />
       <PreloadIcons />
       {logoEl}
 
-      {/* Ovládací panel */}
-      <div
-        className="controls-panel"
-        style={{
-          position: "absolute",
-          top: 10, left: 10, zIndex: 2,
-          color: "white", fontFamily: "sans-serif", fontSize: "14px",
-          opacity: uiReady ? 1 : 0, transition: "opacity .12s ease",
-          backdropFilter: "blur(3px)", background: "rgba(0,0,0,.25)",
-          border: "1px solid rgba(255,255,255,.15)", borderRadius: 8,
-          padding: "8px 10px", width: "clamp(240px, 30vw, 420px)",
-          maxWidth: "calc(100vw - 20px)", boxSizing: "border-box",
-        }}
-      >
+      {/* Panel */}
+      <div className="controls-panel" style={{
+        position: "absolute", top: 10, left: 10, zIndex: 2,
+        color: "white", fontFamily: "sans-serif", fontSize: "14px",
+        opacity: uiReady ? 1 : 0, transition: "opacity .12s ease",
+        backdropFilter: "blur(3px)", background: "rgba(0,0,0,.25)",
+        border: "1px solid rgba(255,255,255,.15)", borderRadius: 8,
+        padding: "8px 10px", width: "clamp(240px, 30vw, 420px)",
+        maxWidth: "calc(100vw - 20px)", boxSizing: "border-box",
+      }}>
         {fatal ? (
           <div style={{ color: "#ff8b8b" }}>{fatal}</div>
         ) : (
           <>
-            {/* ENV error toast (když selže HDRI, nespadne celá appka) */}
             {envError && (
               <div style={{ marginBottom: 8, padding: "8px 10px", borderRadius: 6, background: "rgba(255,0,0,.15)", border: "1px solid rgba(255,0,0,.35)" }}>
                 Prostředí (HDRI) se nepodařilo načíst. Pokračuji bez něj.
@@ -678,7 +682,6 @@ export default function ClientPage() {
               </div>
             ))}
 
-            {/* Světla + Titulek + AutoSmooth + HDRI */}
             <div style={{ display: "grid", gridTemplateColumns: "auto 1fr", alignItems: "center", gap: 8, marginTop: 8 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                 <button className={`toggle arrow-toggle ${showLights ? "is-open" : "is-closed"}`} onClick={() => setShowLights(!showLights)} aria-label="Toggle lights panel"
@@ -738,7 +741,6 @@ export default function ClientPage() {
         }}
         style={{ position: "absolute", inset: 0, zIndex: 1, background: "transparent" }}
       >
-        {/* HDRI prostředí – když selže, jen vypneme env */}
         <EnvLoader
           hdriUrl={HDRI_PRESETS[hdriKey]}
           envTexRef={envTexRef}
@@ -763,7 +765,7 @@ export default function ClientPage() {
                     color={colors[i] ?? "#ffffff"}
                     opacity={opacities[i] ?? 1}
                     visible={visibles[i] ?? true}
-                    onLoaded={handleModelLoaded}
+                    onLoaded={() => handleModelLoaded()}
                     autoSmooth={autoSmooth}
                     smoothAngle={smoothAngle}
                     roughness={roughnesses[i] ?? (typeof f.r === "number" ? f.r : 0.5)}
