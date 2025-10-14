@@ -14,10 +14,6 @@ import { PLYLoader } from "three/examples/jsm/loaders/PLYLoader"
 const ICONS = {
   eye: "/icons/Eye.png",
   eyeOff: "/icons/Eye-off.png",
-  arrowClosed: "/icons/Arrow-closed.svg",
-  arrowOpen: "/icons/Arrow-open.svg",
-  bulb: "/icons/Bulb.png",
-  flashlight: "/icons/Flashlight.png",
 }
 function PreloadIcons() {
   useEffect(() => {
@@ -267,36 +263,15 @@ function AnyModel({
   return visible ? <primitive object={object3D} /> : null
 }
 
-/* ---------- Headlight (PointLight přichycený ke kameře) ---------- */
-function Headlight({ enabled = true, intensity = 1, color = "#ffffff", showHelper = false }) {
-  const { camera, scene } = useThree()
-  const lightRef = useRef(null)
-
-  // Drž světlo v R3F stromu a jen ho přenášej na pozici kamery
+/* ---------- Headlight (PointLight následující kameru) ---------- */
+function Headlight({ enabled = true, intensity = 2, color = "#ffffff" }) {
+  const { camera } = useThree()
+  const ref = useRef(null)
   useFrame(() => {
-    if (!lightRef.current) return
-    lightRef.current.position.copy(camera.position)
+    if (ref.current) ref.current.position.copy(camera.position)
   })
-
-  // Volitelný helper pro vizuální kontrolu
-  useEffect(() => {
-    if (!showHelper || !lightRef.current) return
-    const helper = new THREE.PointLightHelper(lightRef.current, 5)
-    scene.add(helper)
-    return () => {
-      scene.remove(helper)
-      helper.dispose?.()
-    }
-  }, [showHelper, scene])
-
   return (
-    <pointLight
-      ref={lightRef}
-      color={color}
-      intensity={enabled ? intensity : 0}
-      distance={0}
-      decay={0}
-    />
+    <pointLight ref={ref} color={color} intensity={enabled ? intensity : 0} distance={0} decay={0} />
   )
 }
 
@@ -432,17 +407,13 @@ function ColorSwatch({ color, onChange, ariaLabel }) {
 
 /* ---------- ClientPage (Viewer) ---------- */
 export default function ClientPage() {
-  // světla
+  // světla – pevné, ovládání přes manifest/URL, ne přes UI
   const [lightIntensity, setLightIntensity] = useState(1)
   const [lightPos1, setLightPos1] = useState({ x: 0, y: 5, z: 5 })
   const [lightPos2, setLightPos2] = useState({ x: -10, y: 0, z: 0 })
   const [lightPos3, setLightPos3] = useState({ x: 10, y: 0, z: 0 })
   const [lightPos4, setLightPos4] = useState({ x: 0, y: -5, z: -5 })
-  const [showLights, setShowLights] = useState(false)
-  const [headlightOn, setHeadlightOn] = useState(true)
-  const [headlightIntensity, setHeadlightIntensity] = useState(2.0)
-  const [headlightHelper, setHeadlightHelper] = useState(false)
-  const fillDim = headlightOn ? 0.5 : 1
+  const [headlightCfg, setHeadlightCfg] = useState({ enabled: true, intensity: 2.0 })
 
   const [uiReady, setUiReady] = useState(false)
   useEffect(() => { const id = requestAnimationFrame(() => setUiReady(true)); return () => cancelAnimationFrame(id) }, [])
@@ -517,6 +488,22 @@ export default function ClientPage() {
             width: parseInt(getParam("logoWidth") ?? (window.innerWidth < 768 ? "120" : "160"), 10),
             pos: getParam("logoPos") || "bc",
           })
+          // headlight z manifestu
+          const hl = m?.lights?.headlight
+          if (hl && typeof hl === 'object') {
+            setHeadlightCfg({
+              enabled: typeof hl.enabled === 'boolean' ? hl.enabled : true,
+              intensity: typeof hl.intensity === 'number' ? hl.intensity : 2.0,
+            })
+          } else {
+            // fallback na URL
+            const qOn = getParam('headlight')
+            const qI = parseFloat(getParam('headlightI') ?? 'NaN')
+            setHeadlightCfg({
+              enabled: qOn == null ? true : qOn !== '0',
+              intensity: isFinite(qI) ? qI : 2.0,
+            })
+          }
           return
         }
 
@@ -551,6 +538,13 @@ export default function ClientPage() {
             opacity: clamp01(parseFloat(getParam("logoOpacity") ?? "0.9")),
             width: parseInt(getParam("logoWidth") ?? (window.innerWidth < 768 ? "120" : "160"), 10),
             pos: getParam("logoPos") || "bc",
+          })
+          // headlight z URL
+          const qOn = getParam('headlight')
+          const qI = parseFloat(getParam('headlightI') ?? 'NaN')
+          setHeadlightCfg({
+            enabled: qOn == null ? true : qOn !== '0',
+            intensity: isFinite(qI) ? qI : 2.0,
           })
           return
         }
@@ -599,12 +593,15 @@ export default function ClientPage() {
   // ref na root group v Canvasu
   const rootRef = useRef()
 
+  // když je headlight aktivní, lehce stáhneme fill světla, aby byl efekt čitelný
+  const fillDim = headlightCfg.enabled ? 0.5 : 1
+
   return (
     <div className="stage" style={{ position: "relative", width: "100vw", height: "100vh", background: "black" }}>
       <PreloadIcons />
       {logoEl}
 
-      {/* Ovládací panel */}
+      {/* Ovládací panel – zjednodušený: jen per-model barva/opacity/visibility + AutoSmooth */}
       <div
         className="controls-panel"
         style={{
@@ -622,6 +619,12 @@ export default function ClientPage() {
           <div style={{ color: "#ff8b8b" }}>{fatal}</div>
         ) : (
           <>
+            {title && (
+              <div title={title} style={{ marginBottom: 8, maxWidth: 280, padding: "6px 10px", borderRadius: 8, border: "1px solid rgba(255,255,255,.18)", background: "rgba(255,255,255,.08)", fontSize: 13, fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                {title}
+              </div>
+            )}
+
             {files.map((f, i) => (
               <div key={i} className="control-row" style={{
                 display: "grid", gridTemplateColumns: "36px 1fr 26px",
@@ -672,124 +675,18 @@ export default function ClientPage() {
                   <img src={ICONS.eye} alt="" width="18" height="18" style={{ position: "absolute", inset: 0, width: 18, height: 18, margin: "auto", opacity: visibles[i] ? 1 : 0, transition: "opacity .06s linear" }}/>
                   <img src={ICONS.eyeOff} alt="" width="18" height="18" style={{ position: "absolute", inset: 0, width: 18, height: 18, margin: "auto", opacity: visibles[i] ? 0 : 1, transition: "opacity .06s linear" }}/>
                 </button>
-
-                {/* Druhý řádek: Roughness + Metalness */}
-                <div style={{ gridColumn: "1 / -1", display: "grid", gridTemplateColumns: "auto 1fr auto 1fr", columnGap: 8, alignItems: "center" }}>
-                  <span style={{ fontSize: 12, opacity: 0.85 }}>R:</span>
-                  <input
-                    className="slider"
-                    type="range"
-                    min={0} max={1} step={0.01}
-                    value={roughnesses[i] ?? (typeof f.r === "number" ? f.r : 0.5)}
-                    onChange={(e) => {
-                      const v = clamp01(parseFloat(e.target.value))
-                      setRoughnesses((prev) => prev.map((x, idx) => (idx === i ? v : (typeof x === "number" ? x : (idx === i ? v : 0.5)))))
-                    }}
-                    style={{ width: "100%", minWidth: 120 }}
-                    aria-label={`${f.name} roughness`}
-                  />
-                  <span style={{ fontSize: 12, opacity: 0.85 }}>M:</span>
-                  <input
-                    className="slider"
-                    type="range"
-                    min={0} max={1} step={0.01}
-                    value={metalnesses[i] ?? (typeof f.m === "number" ? f.m : 0.5)}
-                    onChange={(e) => {
-                      const v = clamp01(parseFloat(e.target.value))
-                      setMetalnesses((prev) => prev.map((x, idx) => (idx === i ? v : (typeof x === "number" ? x : (idx === i ? v : 0.5)))))
-                    }}
-                    style={{ width: "100%", minWidth: 120 }}
-                    aria-label={`${f.name} metalness`}
-                  />
-                </div>
               </div>
             ))}
 
-            {/* Světla + Titulek + AutoSmooth */}
-            <div style={{ display: "grid", gridTemplateColumns: "auto 1fr", alignItems: "center", gap: 8, marginTop: 8 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                <button
-                  className={`toggle arrow-toggle ${showLights ? "is-open" : "is-closed"}`}
-                  onClick={() => setShowLights(!showLights)}
-                  aria-label="Toggle lights panel"
-                  style={{ display: "inline-flex", alignItems: "center", gap: 8, padding: "6px 10px", border: "1px solid white", borderRadius: 6, background: "transparent", color: "white", cursor: "pointer" }}
-                >
-                  <span className="arrow-stack" aria-hidden style={{ position: "relative", width: 16, height: 16, display: "inline-block" }}>
-                    <img src={ICONS.arrowClosed} width="16" height="16" style={{ position: "absolute", left: 0, top: 0, opacity: showLights ? 0 : 1 }} alt="" />
-                    <img src={ICONS.arrowOpen} width="16" height="16" style={{ position: "absolute", left: 0, top: 0, opacity: showLights ? 1 : 0 }} alt="" />
-                  </span>
-                  <span className="arrow-label">Světla</span>
-                </button>
-
-                {title && (
-                  <div title={title} style={{ maxWidth: 220, padding: "6px 10px", borderRadius: 8, border: "1px solid rgba(255,255,255,.18)", background: "rgba(255,255,255,.08)", fontSize: 13, fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                    {title}
-                  </div>
-                )}
-              </div>
-
-              <div style={{ display: "flex", alignItems: "center", gap: 8, justifyContent: "flex-end" }}>
-                <label style={{ display: "inline-flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
-                  <input type="checkbox" checked={autoSmooth} onChange={(e) => setAutoSmooth(e.target.checked)} />
-                  <span>Auto smooth</span>
-                </label>
-                <span style={{ opacity: 0.8, fontSize: 12 }}>Úhel: {Math.round(smoothAngle)}°</span>
-                <input className="slider" type="range" min={0} max={80} step={1} value={smoothAngle} onChange={(e) => setSmoothAngle(parseFloat(e.target.value))} style={{ width: 120 }} />
-              </div>
+            {/* AutoSmooth */}
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8, justifyContent: "flex-end" }}>
+              <label style={{ display: "inline-flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
+                <input type="checkbox" checked={autoSmooth} onChange={(e) => setAutoSmooth(e.target.checked)} />
+                <span>Auto smooth</span>
+              </label>
+              <span style={{ opacity: 0.8, fontSize: 12 }}>Úhel: {Math.round(smoothAngle)}°</span>
+              <input className="slider" type="range" min={0} max={80} step={1} value={smoothAngle} onChange={(e) => setSmoothAngle(parseFloat(e.target.value))} style={{ width: 120 }} />
             </div>
-
-            {/* Headlight (kamera) – přepínač + intenzita */}
-            <div className="headlight-controls" style={{ marginTop: 8 }}>
-              <div className="lights-row" style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6, flexWrap: "wrap" }}>
-                <img src={ICONS.flashlight} alt="" width="16" height="16" style={{ width: 16, height: 16 }} />
-                <strong style={{ fontSize: 13 }}>Baterka (kamera)</strong>
-                <label style={{ display: "inline-flex", alignItems: "center", gap: 6, cursor: "pointer", marginLeft: "auto" }}>
-                  <input type="checkbox" checked={headlightOn} onChange={(e) => setHeadlightOn(e.target.checked)} />
-                  <span>Zapnuto</span>
-                </label>
-                <label style={{ display: "inline-flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
-                  <input type="checkbox" checked={headlightHelper} onChange={(e) => setHeadlightHelper(e.target.checked)} />
-                  <span>Helper</span>
-                </label>
-              </div>
-              <div className="axis-row" style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <span className="axis-label" aria-hidden="true" style={{ width: 18, textAlign: "right", color: "#fff", opacity: 0.9 }}>I:</span>
-                <input className="slider" type="range" min={0} max={5} step={0.01} value={headlightIntensity} onChange={(e) => setHeadlightIntensity(parseFloat(e.target.value))} style={{ flex: "1 1 auto", width: "100%", minWidth: 140 }} />
-                <span style={{ width: 44, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{headlightIntensity.toFixed(2)}</span>
-              </div>
-            </div>
-
-            {showLights && (
-              <div className="lights-wrap" style={{ marginTop: 6 }}>
-                <div className="lights-row" style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
-                  <img src={ICONS.bulb} alt="" width="16" height="16" style={{ width: 16, height: 16 }} />
-                  <span>Light Intensity</span>
-                </div>
-                <div className="axis-row" style={{ display: "flex", alignItems: "center", gap: 8, margin: "4px 0" }}>
-                  <span className="axis-label" aria-hidden="true" style={{ width: 18, textAlign: "right", color: "#fff", opacity: 0.9 }}>&nbsp;</span>
-                  <input className="slider" type="range" min={0} max={2} step={0.01} value={lightIntensity} onChange={(e) => setLightIntensity(parseFloat(e.target.value))} style={{ flex: "1 1 auto", width: "100%", minWidth: 140 }}/>
-                </div>
-                {[
-                  { label: "Light 1 Position", pos: lightPos1, setPos: setLightPos1 },
-                  { label: "Light 2 Position", pos: lightPos2, setPos: setLightPos2 },
-                  { label: "Light 3 Position", pos: lightPos3, setPos: setLightPos3 },
-                  { label: "Light 4 Position", pos: lightPos4, setPos: setLightPos4 },
-                ].map((light, idx) => (
-                  <div key={idx} className="light-block" style={{ marginTop: 8 }}>
-                    <div className="lights-row" style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
-                      <img src={ICONS.flashlight} alt="" width="16" height="16" style={{ width: 16, height: 16 }} />
-                      <span>{light.label}</span>
-                    </div>
-                    {["x", "y", "z"].map((axis) => (
-                      <div key={axis} className="axis-row" style={{ display: "flex", alignItems: "center", gap: 8, margin: "4px 0" }}>
-                        <span className="axis-label" style={{ width: 18, textAlign: "right", color: "#fff", opacity: 0.9 }}>{axis.toUpperCase()}:</span>
-                        <input className="slider" type="range" min={-10} max={10} step={0.1} value={light.pos[axis]} onChange={(e) => light.setPos({ ...light.pos, [axis]: parseFloat(e.target.value) })} style={{ flex: "1 1 auto", width: "100%", minWidth: 140 }} />
-                      </div>
-                    ))}
-                  </div>
-                ))}
-              </div>
-            )}
           </>
         )}
       </div>
@@ -805,14 +702,14 @@ export default function ClientPage() {
         {!fatal && (
           <>
             <ambientLight intensity={lightIntensity * 0.4 * fillDim} />
-            {/* HEADLIGHT přichycený ke kameře (PointLight) */}
-            <Headlight enabled={headlightOn} intensity={headlightIntensity} color="#ffffff" showHelper={headlightHelper} />
-
-            {/* existující fill/key světla */}
+            {/* Key/fill světla (pevná) */}
             <directionalLight position={[lightPos1.x, lightPos1.y, lightPos1.z]} intensity={lightIntensity * 1.5 * fillDim} />
             <directionalLight position={[lightPos2.x, lightPos2.y, lightPos2.z]} intensity={lightIntensity * 1.0 * fillDim} />
             <directionalLight position={[lightPos3.x, lightPos3.y, lightPos3.z]} intensity={lightIntensity * 1.2 * fillDim} />
             <directionalLight position={[lightPos4.x, lightPos4.y, lightPos4.z]} intensity={lightIntensity * 0.8 * fillDim} />
+
+            {/* Headlight (z manifestu/URL) */}
+            <Headlight enabled={headlightCfg.enabled} intensity={headlightCfg.intensity} />
 
             <group ref={rootRef}>
               <Suspense fallback={null}>
