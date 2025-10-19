@@ -524,12 +524,7 @@ function ColorSwatch({ color, onChange, ariaLabel }) {
 
 /* ---------- ClientPage (Viewer) ---------- */
 export default function ClientPage() {
-  // světla – pevné, ovládání přes manifest/URL, ne přes UI
   const [lightIntensity, setLightIntensity] = useState(1)
-  const [lightPos1] = useState({ x: 0, y: 5, z: 5 })
-  const [lightPos2] = useState({ x: -10, y: 0, z: 0 })
-  const [lightPos3] = useState({ x: 10, y: 0, z: 0 })
-  const [lightPos4] = useState({ x: 0, y: -5, z: -5 })
   const [headlightCfg, setHeadlightCfg] = useState({ enabled: true, intensity: 2.0 })
 
   const [uiReady, setUiReady] = useState(false)
@@ -571,10 +566,16 @@ export default function ClientPage() {
 
   const [cameraTarget, setCameraTarget] = useState([0, 0, 0])
   const [loadedCount, setLoadedCount] = useState(0)
-  const handleModelLoaded = () => setLoadedCount((n) => n + 1)
-
   const centerParam = (getParam("center") || "combined").toLowerCase()
   const centerMode = ["per", "combined", "none"].includes(centerParam) ? centerParam : "combined"
+
+  // správa dočasných blob URL (pro live režim)
+  const liveBlobsRef = useRef([])
+  const revokeLiveBlobs = () => {
+    liveBlobsRef.current.forEach((u) => URL.revokeObjectURL(u))
+    liveBlobsRef.current = []
+  }
+  useEffect(() => () => revokeLiveBlobs(), [])
 
   // INIT: manifest / files param (původní logika)
   useEffect(() => {
@@ -680,19 +681,23 @@ export default function ClientPage() {
           return
         }
 
-        // dev fallback
-        const Fs = [
-          { url: "/models/Upper.obj", name: "Upper", rawName: "Upper.obj", r: 0.5, m: 0.5, v: true, vc: false, km: false },
-          { url: "/models/Lower.stl", name: "Lower", rawName: "Lower.stl", r: 0.5, m: 0.5, v: true, vc: false, km: false },
-          { url: "/models/Crown21.ply", name: "Bridge", rawName: "Crown21.ply", r: 0.5, m: 0.5, v: true, vc: false, km: false },
-        ]
-        setFiles(Fs)
-        const palette = ["#f5f5dc", "#8e8e8e", "#ffffff"]
-        setColors(Fs.map((_, i) => palette[i % palette.length]))
-        setOpacities(Fs.map(() => 1))
-        setVisibles(Fs.map((f) => f.v))
-        setRoughnesses(Fs.map((f) => f.r))
-        setMetalnesses(Fs.map((f) => f.m))
+        // DEV fallback: jen lokálně, v produkci nic
+        if (process.env.NODE_ENV !== "production") {
+          const Fs = [
+            { url: "/models/Upper.obj", name: "Upper", rawName: "Upper.obj", r: 0.5, m: 0.5, v: true, vc: false, km: false },
+            { url: "/models/Lower.stl", name: "Lower", rawName: "Lower.stl", r: 0.5, m: 0.5, v: true, vc: false, km: false },
+            { url: "/models/Crown21.ply", name: "Bridge", rawName: "Crown21.ply", r: 0.5, m: 0.5, v: true, vc: false, km: false },
+          ]
+          setFiles(Fs)
+          const palette = ["#f5f5dc", "#8e8e8e", "#ffffff"]
+          setColors(Fs.map((_, i) => palette[i % palette.length]))
+          setOpacities(Fs.map(() => 1))
+          setVisibles(Fs.map((f) => f.v))
+          setRoughnesses(Fs.map((f) => f.r))
+          setMetalnesses(Fs.map((f) => f.m))
+        } else {
+          setFiles([])
+        }
       } catch (e) {
         console.error(e)
         setFatal("Tento náhled není dostupný (chyba při načtení dat).")
@@ -703,18 +708,35 @@ export default function ClientPage() {
   /* ──────────────── LIVE MODE: posluchač postMessage ──────────────── */
   const applyLivePayload = (p) => {
     if (!p || !Array.isArray(p.files) || p.files.length === 0) return
-    const Fs = p.files.map((x, i) => ({
-      url: x.u,
-      name: stripExt(x.n || `Model ${i + 1}`),
-      rawName: x.n || `Model${i + 1}`,
-      c: x.c,
-      o: typeof x.o === "number" ? clamp01(x.o) : 1,
-      v: typeof x.v === "boolean" ? x.v : true,
-      r: typeof x.r === "number" ? clamp01(x.r) : 0.5,
-      m: typeof x.m === "number" ? clamp01(x.m) : 0.5,
-      vc: !!x.vc,
-      km: !!x.km,
-    }))
+
+    // zruš předchozí dočasná URL
+    revokeLiveBlobs()
+
+    const Fs = p.files.map((x, i) => {
+      let url = x.u
+      if (!url && x.b) {
+        const mime =
+          x.ext === "stl" ? "model/stl" :
+          x.ext === "ply" ? "application/octet-stream" :
+          "text/plain"
+        const blob = new Blob([x.b], { type: mime })
+        url = URL.createObjectURL(blob)
+        liveBlobsRef.current.push(url)
+      }
+      return {
+        url,
+        name: stripExt(x.n || `Model ${i + 1}`),
+        rawName: x.n || `Model${i + 1}`,
+        c: x.c,
+        o: typeof x.o === "number" ? clamp01(x.o) : 1,
+        v: typeof x.v === "boolean" ? x.v : true,
+        r: typeof x.r === "number" ? clamp01(x.r) : 0.5,
+        m: typeof x.m === "number" ? clamp01(x.m) : 0.5,
+        vc: !!x.vc,
+        km: !!x.km,
+      }
+    })
+
     setFiles(Fs)
     const palette = ["#f5f5dc", "#8e8e8e", "#ffffff", "#ffd7a8", "#c0c0c0", "#e6f0ff", "#ffeedd"]
     setColors(Fs.map((f, i) => f.c || palette[i % palette.length]))
@@ -722,7 +744,9 @@ export default function ClientPage() {
     setVisibles(Fs.map((f) => f.v))
     setRoughnesses(Fs.map((f) => f.r))
     setMetalnesses(Fs.map((f) => f.m))
+
     if (typeof p.title === "string" || p.title === null) setTitle(p.title ?? null)
+
     if (p.logo) {
       setLogoCfg((old) => ({
         url: p.logo?.url ?? old.url,
@@ -745,8 +769,8 @@ export default function ClientPage() {
 
   useEffect(() => {
     const onMsg = (e) => {
-      // volitelně: omezit na origin(y)
-      // if (!e.origin.endsWith("arthetic.cz") && !e.origin.includes("vercel.app")) return;
+      // volitelně omez origin:
+      // if (!e.origin.endsWith("arthetic.cz") && !e.origin.includes("vercel.app")) return
       const data = e.data
       if (data && data.type === LIVE_MSG_TYPE && data.payload) {
         applyLivePayload(data.payload)
@@ -756,7 +780,7 @@ export default function ClientPage() {
     return () => window.removeEventListener("message", onMsg)
   }, [])
 
-  // LOGO
+  // LOGO overlay
   const logoEl = logoCfg.url && (
     <img
       src={logoCfg.url}
@@ -791,7 +815,7 @@ export default function ClientPage() {
       <PreloadIcons />
       {logoEl}
 
-      {/* Ovládací panel */}
+      {/* Ovládací panel (ukázkové UI) */}
       <div
         className="controls-panel"
         style={{
@@ -814,178 +838,172 @@ export default function ClientPage() {
           boxSizing: "border-box",
         }}
       >
-        {fatal ? (
-          <div style={{ color: "#ff8b8b" }}>{fatal}</div>
-        ) : (
-          <>
-            {title && (
-              <div
-                title={title}
-                style={{
-                  marginBottom: 8,
-                  maxWidth: 280,
-                  padding: "6px 10px",
-                  borderRadius: 8,
-                  border: "1px solid rgba(255,255,255,.18)",
-                  background: "rgba(255,255,255,.08)",
-                  fontSize: 13,
-                  fontWeight: 600,
-                  whiteSpace: "nowrap",
-                  overflow: "hidden",
-                  textOverflow: "ellipsis",
-                }}
-              >
-                {title}
-              </div>
-            )}
+        {title && (
+          <div
+            title={title}
+            style={{
+              marginBottom: 8,
+              maxWidth: 280,
+              padding: "6px 10px",
+              borderRadius: 8,
+              border: "1px solid rgba(255,255,255,.18)",
+              background: "rgba(255,255,255,.08)",
+              fontSize: 13,
+              fontWeight: 600,
+              whiteSpace: "nowrap",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+            }}
+          >
+            {title}
+          </div>
+        )}
 
-            {files.map((f, i) => (
-              <div
-                key={i}
-                className="control-row"
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "36px 1fr 26px",
-                  alignItems: "center",
-                  columnGap: 6,
-                  rowGap: 6,
-                  margin: "6px 0",
-                }}
-              >
-                <div
-                  className="row-label"
-                  style={{
-                    gridColumn: "1 / -1",
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                    whiteSpace: "nowrap",
-                  }}
-                  title={f.rawName || f.name}
-                >
-                  {stripExt(f.name)}:
-                </div>
-
-                <div className="row-swatch">
-                  <ColorSwatch
-                    color={colors[i] ?? "#ffffff"}
-                    onChange={(c) =>
-                      setColors((prev) => prev.map((v, idx) => (idx === i ? c : v)))
-                    }
-                    ariaLabel={`${f.name} color`}
-                  />
-                </div>
-
-                <div className="row-slider" style={{ minWidth: 0 }}>
-                  <input
-                    className="slider"
-                    type="range"
-                    min={0}
-                    max={1}
-                    step={0.01}
-                    value={opacities[i] ?? 1}
-                    onChange={(e) => {
-                      const v = parseFloat(e.target.value)
-                      setOpacities((prev) =>
-                        prev.map((x, idx) => (idx === i ? v : x))
-                      )
-                    }}
-                    style={{ width: "calc(100% - 18px)", minWidth: 140 }}
-                    aria-label={`${f.name} opacity`}
-                  />
-                </div>
-
-                <button
-                  className={`toggle icon-btn ${visibles[i] ? "is-on" : "is-off"}`}
-                  onClick={() =>
-                    setVisibles((prev) => prev.map((v, idx) => (idx === i ? !v : v)))
-                  }
-                  aria-label={visibles[i] ? `Hide ${f.name}` : `Show ${f.name}`}
-                  style={{
-                    position: "relative",
-                    width: 26,
-                    height: 22,
-                    padding: 0,
-                    display: "inline-flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    overflow: "hidden",
-                    background: "transparent",
-                    border: "1px solid white",
-                    borderRadius: 6,
-                    color: "white",
-                    cursor: "pointer",
-                  }}
-                >
-                  <img
-                    src={ICONS.eye}
-                    alt=""
-                    width="18"
-                    height="18"
-                    style={{
-                      position: "absolute",
-                      inset: 0,
-                      width: 18,
-                      height: 18,
-                      margin: "auto",
-                      opacity: visibles[i] ? 1 : 0,
-                      transition: "opacity .06s linear",
-                    }}
-                  />
-                  <img
-                    src={ICONS.eyeOff}
-                    alt=""
-                    width="18"
-                    height="18"
-                    style={{
-                      position: "absolute",
-                      inset: 0,
-                      width: 18,
-                      height: 18,
-                      margin: "auto",
-                      opacity: visibles[i] ? 0 : 1,
-                      transition: "opacity .06s linear",
-                    }}
-                  />
-                </button>
-              </div>
-            ))}
-
-            {/* AutoSmooth */}
+        {files.map((f, i) => (
+          <div
+            key={i}
+            className="control-row"
+            style={{
+              display: "grid",
+              gridTemplateColumns: "36px 1fr 26px",
+              alignItems: "center",
+              columnGap: 6,
+              rowGap: 6,
+              margin: "6px 0",
+            }}
+          >
             <div
+              className="row-label"
               style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 8,
-                marginTop: 8,
-                justifyContent: "flex-end",
+                gridColumn: "1 / -1",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
               }}
+              title={f.rawName || f.name}
             >
-              <label
-                style={{ display: "inline-flex", alignItems: "center", gap: 6, cursor: "pointer" }}
-              >
-                <input
-                  type="checkbox"
-                  checked={autoSmooth}
-                  onChange={(e) => setAutoSmooth(e.target.checked)}
-                />
-                <span>Auto smooth</span>
-              </label>
-              <span style={{ opacity: 0.8, fontSize: 12 }}>
-                Úhel: {Math.round(smoothAngle)}°
-              </span>
+              {stripExt(f.name)}:
+            </div>
+
+            <div className="row-swatch">
+              <ColorSwatch
+                color={colors[i] ?? "#ffffff"}
+                onChange={(c) =>
+                  setColors((prev) => prev.map((v, idx) => (idx === i ? c : v)))
+                }
+                ariaLabel={`${f.name} color`}
+              />
+            </div>
+
+            <div className="row-slider" style={{ minWidth: 0 }}>
               <input
                 className="slider"
                 type="range"
                 min={0}
-                max={80}
-                step={1}
-                value={smoothAngle}
-                onChange={(e) => setSmoothAngle(parseFloat(e.target.value))}
-                style={{ width: 120 }}
+                max={1}
+                step={0.01}
+                value={opacities[i] ?? 1}
+                onChange={(e) => {
+                  const v = parseFloat(e.target.value)
+                  setOpacities((prev) =>
+                    prev.map((x, idx) => (idx === i ? v : x))
+                  )
+                }}
+                style={{ width: "calc(100% - 18px)", minWidth: 140 }}
+                aria-label={`${f.name} opacity`}
               />
             </div>
-          </>
-        )}
+
+            <button
+              className={`toggle icon-btn ${visibles[i] ? "is-on" : "is-off"}`}
+              onClick={() =>
+                setVisibles((prev) => prev.map((v, idx) => (idx === i ? !v : v)))
+              }
+              aria-label={visibles[i] ? `Hide ${f.name}` : `Show ${f.name}`}
+              style={{
+                position: "relative",
+                width: 26,
+                height: 22,
+                padding: 0,
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                overflow: "hidden",
+                background: "transparent",
+                border: "1px solid white",
+                borderRadius: 6,
+                color: "white",
+                cursor: "pointer",
+              }}
+            >
+              <img
+                src={ICONS.eye}
+                alt=""
+                width="18"
+                height="18"
+                style={{
+                  position: "absolute",
+                  inset: 0,
+                  width: 18,
+                  height: 18,
+                  margin: "auto",
+                  opacity: visibles[i] ? 1 : 0,
+                  transition: "opacity .06s linear",
+                }}
+              />
+              <img
+                src={ICONS.eyeOff}
+                alt=""
+                width="18"
+                height="18"
+                style={{
+                  position: "absolute",
+                  inset: 0,
+                  width: 18,
+                  height: 18,
+                  margin: "auto",
+                  opacity: visibles[i] ? 0 : 1,
+                  transition: "opacity .06s linear",
+                }}
+              />
+            </button>
+          </div>
+        ))}
+
+        {/* AutoSmooth */}
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            marginTop: 8,
+            justifyContent: "flex-end",
+          }}
+        >
+          <label
+            style={{ display: "inline-flex", alignItems: "center", gap: 6, cursor: "pointer" }}
+          >
+            <input
+              type="checkbox"
+              checked={autoSmooth}
+              onChange={(e) => setAutoSmooth(e.target.checked)}
+            />
+            <span>Auto smooth</span>
+          </label>
+          <span style={{ opacity: 0.8, fontSize: 12 }}>
+            Úhel: {Math.round(smoothAngle)}°
+          </span>
+          <input
+            className="slider"
+            type="range"
+            min={0}
+            max={80}
+            step={1}
+            value={smoothAngle}
+            onChange={(e) => setSmoothAngle(parseFloat(e.target.value))}
+            style={{ width: 120 }}
+          />
+        </div>
       </div>
 
       {/* CANVAS */}
@@ -1063,4 +1081,3 @@ export default function ClientPage() {
     </div>
   )
 }
-
