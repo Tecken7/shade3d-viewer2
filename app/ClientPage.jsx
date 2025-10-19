@@ -117,7 +117,9 @@ function AnyModel({
 }) {
   const [object3D, setObject3D] = useState(null)
   const [loading, setLoading] = useState(true)
-  const ext = useMemo(() => inferExt(name || url), [name, url])
+
+  // EXT: zkus nejdřív podle URL (data:… nemusí mít příponu), pak podle jména (s příponou)
+  const ext = useMemo(() => inferExt(url) || inferExt(name), [name, url])
 
   const makeMat = (opts = {}) =>
     new THREE.MeshStandardMaterial({
@@ -154,6 +156,7 @@ function AnyModel({
             : makeMat()
           obj = new THREE.Mesh(base, mat)
         } else {
+          // OBJ (fallback)
           const loaded = await new OBJLoader().loadAsync(url)
           if (keepMaterials) {
             loaded.traverse((child) => {
@@ -183,7 +186,7 @@ function AnyModel({
         }
       } catch (e) {
         if (!cancelled) setLoading(false)
-        console.error("Model load error:", e)
+        console.error("Model load error:", e, { name, url, ext })
       }
     })()
     return () => { cancelled = true }
@@ -236,15 +239,16 @@ export default function ClientPage() {
   const [headlightCfg, setHeadlightCfg] = useState({ enabled: true, intensity: 2 })
   const [title, setTitle] = useState(null)
   const [logoCfg, setLogoCfg] = useState({ url: DEFAULT_LOGO, opacity: 0.9, width: 160, pos: "bc" })
-  const [files, setFiles] = useState([])
+
+  // modely
+  const [files, setFiles] = useState([]) // {url, name (s příponou!), c,o,v,r,m,vc,km}
   const [colors, setColors] = useState([])
   const [opacities, setOpacities] = useState([])
   const [visibles, setVisibles] = useState([])
   const [roughnesses, setRoughnesses] = useState([])
   const [metalnesses, setMetalnesses] = useState([])
   const [fatal, setFatal] = useState(null)
-  const [autoSmooth] = useState(true)
-  const [smoothAngle] = useState(30)
+
   const [loadedCount, setLoadedCount] = useState(0)
   const rootRef = useRef(null)
   const [frameTick, setFrameTick] = useState(0)
@@ -253,11 +257,19 @@ export default function ClientPage() {
   /* ---- LIVE listener + HANDSHAKE ---- */
   const applyLivePayload = (p) => {
     if (!p) return
+
+    // 1) files – POZOR: necháváme příponu v name!
     if (Array.isArray(p.files)) {
       const newFiles = p.files.map((x, i) => ({
-        url: x.u, name: stripExt(x.n || `Model ${i + 1}`), c: x.c, o: clamp01(x.o || 1),
-        v: x.v !== false, r: clamp01(x.r || 0.5), m: clamp01(x.m || 0.5),
-        vc: !!x.vc, km: !!x.km,
+        url: x.u,
+        name: x.n || `Model${i + 1}`, // zde NEstripovat → inferExt funguje
+        c: x.c,
+        o: typeof x.o === "number" ? clamp01(x.o) : 1,
+        v: x.v !== false,
+        r: typeof x.r === "number" ? clamp01(x.r) : 0.5,
+        m: typeof x.m === "number" ? clamp01(x.m) : 0.5,
+        vc: !!x.vc,
+        km: !!x.km,
       }))
       setFiles(newFiles)
       const palette = ["#f5f5dc","#8e8e8e","#ffffff","#ffd7a8","#c0c0c0","#e6f0ff","#ffeedd"]
@@ -268,6 +280,8 @@ export default function ClientPage() {
       setMetalnesses(newFiles.map((f) => f.m))
       setLoadedCount(0)
     }
+
+    // 2) title/logo/lights jsou volitelné a můžou chodit samostatně
     if (typeof p.title === "string" || p.title === null) setTitle(p.title ?? null)
     if (p.logo) {
       setLogoCfg((old) => ({
@@ -301,9 +315,68 @@ export default function ClientPage() {
     return () => window.removeEventListener("message", onMsg)
   }, [])
 
+  // Až když jsou VŠECHNY načtené, vyvoláme dorámování
   useEffect(() => {
     if (files.length > 0 && loadedCount === files.length) setFrameTick((t) => t + 1)
   }, [files.length, loadedCount])
+
+  /* ---- UI panel: viditelnost + opacity slider + název (bez přípon) ---- */
+  const Controls = () => (
+    <div
+      style={{
+        position: "absolute",
+        top: 10, left: 10, zIndex: 2,
+        color: "#fff", fontFamily: "Inter, system-ui, sans-serif", fontSize: 13,
+        backdropFilter: "blur(3px)", background: "rgba(0,0,0,.25)",
+        border: "1px solid rgba(255,255,255,.15)", borderRadius: 8,
+        padding: "8px 10px", width: "clamp(240px, 30vw, 420px)",
+        maxWidth: "calc(100vw - 20px)"
+      }}
+    >
+      {title && (
+        <div
+          title={title}
+          style={{
+            marginBottom: 8, maxWidth: 280, padding: "6px 10px",
+            borderRadius: 8, border: "1px solid rgba(255,255,255,.18)",
+            background: "rgba(255,255,255,.08)", fontWeight: 600,
+            whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis"
+          }}
+        >
+          {title}
+        </div>
+      )}
+
+      {files.map((f, i) => (
+        <div key={f.url + i} style={{
+          display: "grid", gridTemplateColumns: "1fr 56px 24px", alignItems: "center", gap: 8, margin: "6px 0"
+        }}>
+          <div title={f.name} style={{whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>
+            {stripExt(f.name)}
+          </div>
+          <input
+            type="range" min={0} max={1} step={0.01}
+            value={opacities[i] ?? 1}
+            onChange={(e) => {
+              const v = parseFloat(e.target.value)
+              setOpacities(prev => prev.map((x, idx) => (idx === i ? v : x)))
+            }}
+          />
+          <button
+            onClick={() => setVisibles(prev => prev.map((v, idx) => (idx === i ? !v : v)))}
+            aria-label={visibles[i] ? `Hide ${f.name}` : `Show ${f.name}`}
+            style={{
+              width: 24, height: 22, borderRadius: 6, border: "1px solid #fff",
+              background: "transparent", color: "#fff", cursor: "pointer"
+            }}
+            title={visibles[i] ? "Skrýt" : "Zobrazit"}
+          >
+            {visibles[i] ? "👁" : "🚫"}
+          </button>
+        </div>
+      ))}
+    </div>
+  )
 
   const logoEl = logoCfg.url && (
     <img
@@ -317,8 +390,10 @@ export default function ClientPage() {
         transform: logoCfg.pos === "bc" ? "translateX(-50%)" : "none",
         width: logoCfg.width,
         opacity: logoCfg.opacity,
+        zIndex: 0,
         pointerEvents: "none",
         userSelect: "none",
+        filter: "drop-shadow(0 0 1px rgba(0,0,0,.25))",
       }}
     />
   )
@@ -326,35 +401,43 @@ export default function ClientPage() {
   return (
     <div style={{ position: "relative", width: "100vw", height: "100vh", background: "black" }}>
       {logoEl}
-      {title && (
-        <div style={{
-          position: "absolute", top: 10, left: 10, zIndex: 2,
-          padding: "6px 10px", borderRadius: 8,
-          border: "1px solid rgba(255,255,255,.18)", background: "rgba(255,255,255,.08)",
-          fontSize: 13, fontWeight: 600, color: "#fff"
-        }}>
-          {title}
-        </div>
-      )}
+      <Controls />
+
       <Canvas orthographic camera={{ position: [0, 0, 1000], near: 0.1, far: 1e7 }} gl={{ alpha: true }}>
         {!fatal && (
           <>
             <ambientLight intensity={lightIntensity * 0.4} />
             <directionalLight position={[0, 5, 5]} intensity={lightIntensity * 1.5} />
             <directionalLight position={[-10, 0, 0]} intensity={lightIntensity * 1.0} />
+            <directionalLight position={[10, 0, 0]} intensity={lightIntensity * 1.2} />
+            <directionalLight position={[0, -5, -5]} intensity={lightIntensity * 0.8} />
+
             <Headlight enabled={headlightCfg.enabled} intensity={headlightCfg.intensity} />
+
             <group ref={rootRef}>
               <Suspense fallback={null}>
                 {files.map((f, i) => (
-                  <AnyModel key={f.url + i} name={f.name} url={f.url}
-                    color={colors[i]} opacity={opacities[i]} visible={visibles[i]}
-                    onLoaded={handleModelLoaded} autoSmoothOn={autoSmooth} smoothAngle={smoothAngle}
-                    roughness={roughnesses[i]} metalness={metalnesses[i]}
-                    useVertexColors={f.vc} keepMaterials={f.km} />
+                  <AnyModel
+                    key={f.url + i}
+                    name={f.name}       // s příponou, kvůli inferExt
+                    url={f.url}
+                    color={colors[i] ?? "#ffffff"}
+                    opacity={opacities[i] ?? 1}
+                    visible={visibles[i] ?? true}
+                    onLoaded={handleModelLoaded}
+                    autoSmoothOn={true}
+                    smoothAngle={30}
+                    roughness={roughnesses[i] ?? (typeof f.r === "number" ? f.r : 0.5)}
+                    metalness={metalnesses[i] ?? (typeof f.m === "number" ? f.m : 0.5)}
+                    useVertexColors={!!f.vc}
+                    keepMaterials={!!f.km}
+                  />
                 ))}
               </Suspense>
             </group>
+
             <AutoCenterAndFrameOnce rootRef={rootRef} triggerKey={`frame-${files.length}-${frameTick}`} margin={1.2} />
+
             <OrbitControls enableDamping dampingFactor={0.12} />
           </>
         )}
