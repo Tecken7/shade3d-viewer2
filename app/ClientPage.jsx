@@ -847,5 +847,3 @@ export default function ClientPage() {
     </div>
   )
 }
-
-
