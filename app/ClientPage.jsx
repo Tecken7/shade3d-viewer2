@@ -11,7 +11,7 @@ import { STLLoader } from "three/examples/jsm/loaders/STLLoader"
 import { PLYLoader } from "three/examples/jsm/loaders/PLYLoader"
 
 /* ---------- Konstanty ---------- */
-const LIVE_MSG_TYPES = new Set(["SHADE3D_LIVE", "SHADE3D_LIVE_V6", "SHADE3D_LIVE_V5"])
+const LIVE_MSG_TYPE = "SHADE3D_LIVE"
 
 /* ---------- Ikony + preload ---------- */
 const ICONS = {
@@ -210,8 +210,12 @@ function AnyModel({
           onLoaded && onLoaded(obj)
         }
       } catch (e) {
-        if (!cancelled) setLoading(false)
-        console.error("Model load error:", e)
+        if (!cancelled) {
+          setLoading(false)
+          console.error("Model load error:", e)
+          // DŮLEŽITÉ: zvedni counter i po chybě, aby se „allLoaded“ nezasekl
+          onLoaded && onLoaded(null)
+        }
       }
     })()
     return () => { cancelled = true }
@@ -323,17 +327,20 @@ function TouchTrackballControls({ target = [0, 0, 0] }) {
 
   return null
 }
-/* ---------- AutoCenter & AutoFrame (opravené) ---------- */
+
+/* ---------- AutoCenter & AutoFrame (upravené: čeká na allLoaded) ---------- */
 function AutoCenterAndFrame({
   rootRef, depsKey, setTarget,
   margin = 1.2, isMobile = false, desktopScale = 0.4, mobileScale = 1.0,
   centerMode = "combined",
-  shouldFrame, // ref z parentu – říká, jestli máme znovu rámovat
+  shouldFrame,   // ref z parentu – říká, jestli máme znovu rámovat
+  ready,         // NOVÉ: true až když jsou všechny modely načtené
 }) {
   const { camera, size } = useThree()
 
   useEffect(() => {
-    if (!shouldFrame?.current) return
+    // rámuj jen pokud parent chce a jsme „ready“
+    if (!shouldFrame?.current || !ready) return
 
     const root = rootRef.current
     if (!root) return
@@ -392,7 +399,7 @@ function AutoCenterAndFrame({
     // po dorámování zamknout, dokud se opravdu nezmění soubory
     shouldFrame.current = false
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [depsKey, size.width, size.height, isMobile, desktopScale, mobileScale, margin, centerMode])
+  }, [depsKey, ready, size.width, size.height, isMobile, desktopScale, mobileScale, margin, centerMode])
 
   return null
 }
@@ -592,47 +599,42 @@ export default function ClientPage() {
       }
     })()
   }, [])
+
   /* ──────────────── LIVE MODE: posluchač postMessage ──────────────── */
   const applyLivePayload = (p) => {
-    if (!p) return
+    if (!p || !Array.isArray(p.files)) return
 
-    // 1) Files jsou VOLITELNÉ – zpracuj jen když dorazí
-    let filesActuallyChanged = false
-    if (Array.isArray(p.files)) {
-      const newFiles = p.files.map((x, i) => ({
-        url: x.u,
-        name: stripExt(x.n || `Model ${i + 1}`),
-        rawName: x.n || `Model${i + 1}`,
-        c: x.c,
-        o: typeof x.o === "number" ? clamp01(x.o) : 1,
-        v: typeof x.v === "boolean" ? x.v : true,
-        r: typeof x.r === "number" ? clamp01(x.r) : 0.5,
-        m: typeof x.m === "number" ? clamp01(x.m) : 0.5,
-        vc: !!x.vc,
-        km: !!x.km,
-      }))
+    // 1) Pokud se změnily samotné soubory (URL/počet), dovolíme jedno nové zarámování
+    const newFiles = p.files.map((x, i) => ({
+      url: x.u,
+      name: stripExt(x.n || `Model ${i + 1}`),
+      rawName: x.n || `Model${i + 1}`,
+      c: x.c,
+      o: typeof x.o === "number" ? clamp01(x.o) : 1,
+      v: typeof x.v === "boolean" ? x.v : true,
+      r: typeof x.r === "number" ? clamp01(x.r) : 0.5,
+      m: typeof x.m === "number" ? clamp01(x.m) : 0.5,
+      vc: !!x.vc,
+      km: !!x.km,
+    }))
 
-      const newKeys = newFiles.map(f => `${f.url}::${f.rawName || f.name}`)
-      const prevKeys = prevFileKeysRef.current
-      filesActuallyChanged =
-        newKeys.length !== prevKeys.length ||
-        newKeys.some((k, i) => k !== prevKeys[i])
+    const newKeys = newFiles.map(f => `${f.url}::${f.rawName || f.name}`)
+    const prevKeys = prevFileKeysRef.current
+    const filesActuallyChanged =
+      newKeys.length !== prevKeys.length ||
+      newKeys.some((k, i) => k !== prevKeys[i])
 
-      setFiles(newFiles)
-      prevFileKeysRef.current = newKeys
+    setFiles(newFiles)
+    prevFileKeysRef.current = newKeys
 
-      const palette = ["#f5f5dc", "#8e8e8e", "#ffffff", "#ffd7a8", "#c0c0c0", "#e6f0ff", "#ffeedd"]
-      setColors(newFiles.map((f, i) => f.c || palette[i % palette.length]))
-      setOpacities(newFiles.map((f) => f.o))
-      setVisibles(newFiles.map((f) => f.v))
-      setRoughnesses(newFiles.map((f) => f.r))
-      setMetalnesses(newFiles.map((f) => f.m))
-    }
+    const palette = ["#f5f5dc", "#8e8e8e", "#ffffff", "#ffd7a8", "#c0c0c0", "#e6f0ff", "#ffeedd"]
+    setColors(newFiles.map((f, i) => f.c || palette[i % palette.length]))
+    setOpacities(newFiles.map((f) => f.o))
+    setVisibles(newFiles.map((f) => f.v))
+    setRoughnesses(newFiles.map((f) => f.r))
+    setMetalnesses(newFiles.map((f) => f.m))
 
-    // 2) Title / Logo – fungují i bez files
-    if (typeof p.title === "string" || p.title === null) {
-      setTitle(p.title ?? null)
-    }
+    if (typeof p.title === "string" || p.title === null) setTitle(p.title ?? null)
     if (p.logo) {
       setLogoCfg((old) => ({
         url: p.logo?.url ?? old.url,
@@ -641,8 +643,6 @@ export default function ClientPage() {
         pos: p.logo?.pos || old.pos,
       }))
     }
-
-    // 3) Lights – fungují i bez files
     if (p.lights) {
       if (typeof p.lights.intensity === "number") setLightIntensity(p.lights.intensity)
       if (p.lights.headlight) {
@@ -653,7 +653,7 @@ export default function ClientPage() {
       }
     }
 
-    // 4) Dorámování jen při změně modelů
+    // 2) Reframe pouze když se změnily soubory (ne když měníme barvu/opacity…)
     shouldFrameRef.current = filesActuallyChanged
     if (filesActuallyChanged) setLoadedCount(0)
   }
@@ -661,7 +661,7 @@ export default function ClientPage() {
   useEffect(() => {
     const onMsg = (e) => {
       const data = e.data
-      if (data && LIVE_MSG_TYPES.has(data.type) && data.payload) {
+      if (data && data.type === LIVE_MSG_TYPE && data.payload) {
         applyLivePayload(data.payload)
       }
     }
@@ -682,7 +682,7 @@ export default function ClientPage() {
         transform: logoCfg.pos === "bc" ? "translateX(-50%)" : "none",
         width: logoCfg.width,
         opacity: logoCfg.opacity,
-        zIndex: 0,               // <- důležité: pod 3D canvasem
+        zIndex: 0,               // pod 3D canvasem
         pointerEvents: "none",
         userSelect: "none",
         filter: "drop-shadow(0 0 1px rgba(0,0,0,.25))",
@@ -711,22 +711,16 @@ export default function ClientPage() {
     return null
   }
 
-  // když se domodelovalo vše, dovolíme první/další dorámování (pokud je povoleno)
-  useEffect(() => {
-    if (files.length > 0 && loadedCount === files.length) {
-      // pouze v případě, že o to někdo explicitně požádal (nové soubory)
-      // jinak necháváme uživatelskou pozici a zoom
-    }
-  }, [files.length, loadedCount])
+  // jsme připraveni rámovat až když je vše načtené
+  const allLoaded = files.length > 0 && loadedCount === files.length
 
   // když přijde změna, která má rámovat, přepočítáme depsKey (použije se v AutoCenterAndFrame)
   const frameDepsKey =
-    shouldFrameRef.current
+    (shouldFrameRef.current && allLoaded)
       ? `frame-${files.length}-${loadedCount}`
       : `noframe-${files.length}-${loadedCount}`
 
-  // když uživatel posune kameru, Trackball si drží target interně; pro AutoCenterAndFrame mu posíláme náš cameraTarget.
-  // ten aktualizujeme pouze v AutoCenterAndFrame (po dorámování).
+  // fill světlo mírně utlumíme, pokud je zapnutá baterka, aby se nevypral kontrast
   const fillDim = headlightCfg.enabled ? 0.5 : 1
 
   return (
@@ -742,7 +736,7 @@ export default function ClientPage() {
         className="controls-panel"
         style={{
           position: "absolute",
-          top: 10, left: 10, zIndex: 2, // <- nad 3D
+          top: 10, left: 10, zIndex: 2,
           color: "white", fontFamily: "sans-serif", fontSize: "14px",
           opacity: uiReady ? 1 : 0, transition: "opacity .12s ease",
           backdropFilter: "blur(3px)", background: "rgba(0,0,0,.25)",
@@ -877,10 +871,10 @@ export default function ClientPage() {
               </Suspense>
             </group>
 
-            {/* Dorámování pouze pokud shouldFrameRef.current === true */}
+            {/* Dorámování pouze když jsou VŠECHNY modely načtené a parent o to požádal */}
             <AutoCenterAndFrame
               rootRef={rootRef}
-              depsKey={shouldFrameRef.current ? `frame-${files.length}-${loadedCount}` : `noframe-${files.length}-${loadedCount}`}
+              depsKey={frameDepsKey}
               setTarget={setCameraTarget}
               margin={1.2}
               isMobile={isMobile}
@@ -888,6 +882,7 @@ export default function ClientPage() {
               mobileScale={1.0}
               centerMode={centerMode}
               shouldFrame={shouldFrameRef}
+              ready={allLoaded}   // ⬅️ důležité
             />
 
             <TouchTrackballControls target={cameraTarget} />
