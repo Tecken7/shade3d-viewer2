@@ -781,7 +781,6 @@ export default function ClientPage() {
   )
 
   const rootRef = useRef()
-  const [cameraTarget, setCameraTarget] = useState([0, 0, 0])
   const fillDim = headlightCfg.enabled ? 0.5 : 1
 
   return (
@@ -1064,3 +1063,4 @@ export default function ClientPage() {
     </div>
   )
 }
+
