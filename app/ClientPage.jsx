@@ -3,31 +3,14 @@
 import { Canvas, useThree, useFrame } from "@react-three/fiber"
 import * as THREE from "three"
 import { Suspense, useEffect, useMemo, useRef, useState } from "react"
-import { HexColorPicker, HexColorInput } from "react-colorful"
 import { Html } from "@react-three/drei"
 import { TrackballControls } from "three/examples/jsm/controls/TrackballControls"
 import { OBJLoader } from "three/examples/jsm/loaders/OBJLoader"
 import { STLLoader } from "three/examples/jsm/loaders/STLLoader"
 import { PLYLoader } from "three/examples/jsm/loaders/PLYLoader"
 
-/* ---------- Konstanta pro live kanál ---------- */
-const LIVE_MSG_TYPE = "SHADE3D_LIVE_UPDATE"
-
-/* ---------- Ikony + preload ---------- */
-const ICONS = {
-  eye: "/icons/Eye.png",
-  eyeOff: "/icons/Eye-off.png",
-}
-function PreloadIcons() {
-  useEffect(() => {
-    Object.values(ICONS).forEach((src) => {
-      const img = new Image()
-      img.decoding = "async"
-      img.src = src
-    })
-  }, [])
-  return null
-}
+/* ---------- Live kanál ---------- */
+const LIVE_MSG_TYPE = "SHADE3D_LIVE"
 
 /* ---------- Helpers ---------- */
 const DEFAULT_LOGO = "/Arthetic_logo.png"
@@ -278,7 +261,7 @@ function Headlight({ enabled = true, intensity = 2, color = "#ffffff" }) {
   )
 }
 
-/* ---------- Trackball (bez resetu kamery) ---------- */
+/* ---------- Trackball bez resetů ---------- */
 function TouchTrackballControls({ target = [0, 0, 0] }) {
   const { camera, gl } = useThree()
   const controlsRef = useRef(null)
@@ -315,7 +298,8 @@ function TouchTrackballControls({ target = [0, 0, 0] }) {
 
   return null
 }
-/* ---------- AutoCenter & AutoFrame (rámovat až po úplném načtení) ---------- */
+
+/* ---------- AutoCenter & AutoFrame (rámování až po úplném načtení) ---------- */
 function AutoCenterAndFrame({
   rootRef, depsKey, setTarget,
   margin = 1.2, isMobile = false, desktopScale = 0.4, mobileScale = 1.0,
@@ -389,11 +373,11 @@ function AutoCenterAndFrame({
 
 /* ---------- ClientPage (Viewer) ---------- */
 export default function ClientPage() {
-  // světla (pevné body), headlight z URL/manifestu nebo live
+  // světla
   const [lightIntensity, setLightIntensity] = useState(1)
   const [headlightCfg, setHeadlightCfg] = useState({ enabled: true, intensity: 2.0 })
 
-  // UI zapnutí po mountu (kvůli přechodu opacity)
+  // UI zapnutí po mountu
   const [uiReady, setUiReady] = useState(false)
   useEffect(() => { const id = requestAnimationFrame(() => setUiReady(true)); return () => cancelAnimationFrame(id) }, [])
 
@@ -418,20 +402,20 @@ export default function ClientPage() {
   const [fatal, setFatal] = useState(null)
 
   // auto smooth
-  const [autoSmooth, setAutoSmooth] = useState((getParam("smooth") ?? "1") !== "0")
-  const [smoothAngle, setSmoothAngle] = useState(() => {
+  const [autoSmooth] = useState((getParam("smooth") ?? "1") !== "0")
+  const [smoothAngle] = useState(() => {
     const v = parseFloat(getParam("smoothAngle") ?? "30")
     return isFinite(v) ? Math.max(0, Math.min(80, v)) : 30
   })
 
-  // logo (MÁ BÝT POD MODELEM → z-index níže než Canvas)
+  // logo (POD 3D – zIndex 0, Canvas má 1)
   const [logoCfg, setLogoCfg] = useState({ url: DEFAULT_LOGO, opacity: 0.9, width: 160, pos: "bc" })
 
   // orámování po načtení všech modelů
   const [cameraTarget, setCameraTarget] = useState([0, 0, 0])
   const [loadedCount, setLoadedCount] = useState(0)
   const handleModelLoaded = () => setLoadedCount((n) => n + 1)
-  const shouldFrameRef = useRef(true) // řízeno při změně souborů / live payloadu
+  const shouldFrameRef = useRef(true)
 
   const centerParam = (getParam("center") || "combined").toLowerCase()
   const centerMode = ["per", "combined", "none"].includes(centerParam) ? centerParam : "combined"
@@ -535,7 +519,7 @@ export default function ClientPage() {
           return
         }
 
-        // žádné parametry – bez fallback modelů (čistá scéna)
+        // žádné parametry – čistá scéna (žádné demo modely)
         setFiles([])
         setColors([])
         setOpacities([])
@@ -551,10 +535,37 @@ export default function ClientPage() {
     })()
   }, [])
 
-  /* ──────────────── LIVE MODE: posluchač postMessage ──────────────── */
+  /* ──────────────── LIVE MODE: posluchač postMessage (robustní) ──────────────── */
   const applyLivePayload = (p) => {
-    if (!p || !Array.isArray(p.files)) return
-    const Fs = p.files.map((x, i) => ({
+    if (!p) return
+
+    // pokud přijdou jen parametry/světla
+    if (p.onlyParams) {
+      if (typeof p.title === "string" || p.title === null) setTitle(p.title ?? null)
+      if (p.logo) {
+        setLogoCfg((old) => ({
+          url: p.logo?.url ?? old.url,
+          opacity: typeof p.logo?.opacity === "number" ? clamp01(p.logo.opacity) : old.opacity,
+          width: typeof p.logo?.width === "number" ? p.logo.width : old.width,
+          pos: p.logo?.pos || old.pos,
+        }))
+      }
+      return
+    }
+    if (p.onlyLights && p.lights) {
+      if (typeof p.lights.intensity === "number") setLightIntensity(p.lights.intensity)
+      if (p.lights.headlight) {
+        setHeadlightCfg((old) => ({
+          enabled: typeof p.lights.headlight.enabled === "boolean" ? p.lights.headlight.enabled : old.enabled,
+          intensity: typeof p.lights.headlight.intensity === "number" ? p.lights.headlight.intensity : old.intensity,
+        }))
+      }
+      return
+    }
+
+    // plný datový update
+    const arr = Array.isArray(p.files) ? p.files : []
+    const Fs = arr.map((x, i) => ({
       url: x.u,
       name: stripExt(x.n || `Model ${i + 1}`),
       rawName: x.n || `Model${i + 1}`,
@@ -566,6 +577,7 @@ export default function ClientPage() {
       vc: !!x.vc,
       km: !!x.km,
     }))
+
     setFiles(Fs)
     const palette = ["#f5f5dc", "#8e8e8e", "#ffffff", "#ffd7a8", "#c0c0c0", "#e6f0ff", "#ffeedd"]
     setColors(Fs.map((f, i) => f.c || palette[i % palette.length]))
@@ -573,6 +585,7 @@ export default function ClientPage() {
     setVisibles(Fs.map((f) => f.v))
     setRoughnesses(Fs.map((f) => f.r))
     setMetalnesses(Fs.map((f) => f.m))
+
     if (typeof p.title === "string" || p.title === null) setTitle(p.title ?? null)
     if (p.logo) {
       setLogoCfg((old) => ({
@@ -597,10 +610,16 @@ export default function ClientPage() {
 
   useEffect(() => {
     const onMsg = (e) => {
-      const data = e.data
-      if (data && data.type === LIVE_MSG_TYPE && data.payload) {
-        applyLivePayload(data.payload)
+      const d = e.data
+      if (!d) return
+      let payload = null
+      if (d && d.type === LIVE_MSG_TYPE && d.payload) {
+        payload = d.payload
+      } else if (d && (d.files || d.title !== undefined || d.logo || d.lights || d.onlyParams || d.onlyLights)) {
+        payload = d
       }
+      if (!payload) return
+      applyLivePayload(payload)
     }
     window.addEventListener("message", onMsg)
     return () => window.removeEventListener("message", onMsg)
@@ -629,6 +648,7 @@ export default function ClientPage() {
 
   const rootRef = useRef()
   const fillDim = headlightCfg.enabled ? 0.5 : 1
+
   /* ---------- RENDER ---------- */
   return (
     <div
@@ -641,204 +661,9 @@ export default function ClientPage() {
         overflow: "hidden",
       }}
     >
-      <PreloadIcons />
-
-      {/* LOGO JE POD 3D (zIndex:0), ale nad černým pozadím */}
+      {/* LOGO JE POD 3D */}
       {logoEl}
 
-      {/* Ovládací panel (jen live ovladače) */}
-      <div
-        className="controls-panel"
-        style={{
-          position: "absolute",
-          top: 10,
-          left: 10,
-          zIndex: 2,
-          color: "white",
-          fontFamily: "sans-serif",
-          fontSize: "14px",
-          opacity: uiReady ? 1 : 0,
-          transition: "opacity .12s ease",
-          backdropFilter: "blur(3px)",
-          background: "rgba(0,0,0,.25)",
-          border: "1px solid rgba(255,255,255,.15)",
-          borderRadius: 8,
-          padding: "8px 10px",
-          width: "clamp(240px, 30vw, 420px)",
-          maxWidth: "calc(100vw - 20px)",
-          boxSizing: "border-box",
-          pointerEvents: "auto",
-        }}
-      >
-        {fatal ? (
-          <div style={{ color: "#ff8b8b" }}>{fatal}</div>
-        ) : (
-          <>
-            {title && (
-              <div
-                title={title}
-                style={{
-                  marginBottom: 8,
-                  maxWidth: 280,
-                  padding: "6px 10px",
-                  borderRadius: 8,
-                  border: "1px solid rgba(255,255,255,.18)",
-                  background: "rgba(255,255,255,.08)",
-                  fontSize: 13,
-                  fontWeight: 600,
-                  whiteSpace: "nowrap",
-                  overflow: "hidden",
-                  textOverflow: "ellipsis",
-                }}
-              >
-                {title}
-              </div>
-            )}
-
-            {files.map((f, i) => (
-              <div
-                key={i}
-                className="control-row"
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "36px 1fr 26px",
-                  alignItems: "center",
-                  columnGap: 6,
-                  rowGap: 6,
-                  margin: "6px 0",
-                }}
-              >
-                {/* Label */}
-                <div
-                  className="row-label"
-                  style={{
-                    gridColumn: "1 / -1",
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                    whiteSpace: "nowrap",
-                  }}
-                  title={f.rawName || f.name}
-                >
-                  {stripExt(f.name)}:
-                </div>
-
-                {/* Swatch – necháváme jen “informativní” ovladače, změny chodí z Uploaderu */}
-                <div className="row-swatch">
-                  <div
-                    aria-label={`${f.name} color`}
-                    style={{
-                      width: 36,
-                      height: 22,
-                      borderRadius: 4,
-                      border: "1px solid #fff",
-                      background: colors[i] ?? "#ffffff",
-                      boxShadow: "0 0 0 1px rgba(0,0,0,.25) inset",
-                    }}
-                  />
-                </div>
-
-                {/* Slider – Opacity (read-only UI, řídí se postMessage) */}
-                <div className="row-slider" style={{ minWidth: 0 }}>
-                  <input
-                    className="slider"
-                    type="range"
-                    min={0}
-                    max={1}
-                    step={0.01}
-                    value={opacities[i] ?? 1}
-                    readOnly
-                    style={{ width: "calc(100% - 18px)", minWidth: 140 }}
-                    aria-label={`${f.name} opacity`}
-                  />
-                </div>
-
-                {/* Eye (read-only indikace) */}
-                <div
-                  style={{
-                    position: "relative",
-                    width: 26,
-                    height: 22,
-                    display: "inline-flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    border: "1px solid white",
-                    borderRadius: 6,
-                  }}
-                >
-                  <img
-                    src={ICONS.eye}
-                    alt=""
-                    width="18"
-                    height="18"
-                    style={{
-                      position: "absolute",
-                      inset: 0,
-                      width: 18,
-                      height: 18,
-                      margin: "auto",
-                      opacity: visibles[i] ? 1 : 0,
-                      transition: "opacity .06s linear",
-                    }}
-                  />
-                  <img
-                    src={ICONS.eyeOff}
-                    alt=""
-                    width="18"
-                    height="18"
-                    style={{
-                      position: "absolute",
-                      inset: 0,
-                      width: 18,
-                      height: 18,
-                      margin: "auto",
-                      opacity: visibles[i] ? 0 : 1,
-                      transition: "opacity .06s linear",
-                    }}
-                  />
-                </div>
-              </div>
-            ))}
-
-            {/* AutoSmooth – live z Uploaderu i tu (jen indikace/ladění) */}
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 8,
-                marginTop: 8,
-                justifyContent: "flex-end",
-              }}
-            >
-              <label
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: 6,
-                  cursor: "default",
-                }}
-              >
-                <input type="checkbox" checked={autoSmooth} readOnly />
-                <span>Auto smooth</span>
-              </label>
-              <span style={{ opacity: 0.8, fontSize: 12 }}>
-                Úhel: {Math.round(smoothAngle)}°
-              </span>
-              <input
-                className="slider"
-                type="range"
-                min={0}
-                max={80}
-                step={1}
-                value={smoothAngle}
-                readOnly
-                style={{ width: 120 }}
-              />
-            </div>
-          </>
-        )}
-      </div>
-
-      {/* CANVAS (z-index 1 – nad logem) */}
       <Canvas
         orthographic
         camera={{ position: [0, 0, 100], near: 0.1, far: 1e7 }}
@@ -854,13 +679,11 @@ export default function ClientPage() {
         {!fatal && (
           <>
             <ambientLight intensity={lightIntensity * 0.4 * fillDim} />
-            {/* jednoduché fill/key světla (neovládáme v UI) */}
             <directionalLight position={[0, 5, 5]} intensity={lightIntensity * 1.5 * fillDim} />
             <directionalLight position={[-10, 0, 0]} intensity={lightIntensity * 1.0 * fillDim} />
             <directionalLight position={[10, 0, 0]} intensity={lightIntensity * 1.2 * fillDim} />
             <directionalLight position={[0, -5, -5]} intensity={lightIntensity * 0.8 * fillDim} />
 
-            {/* Headlight následující kameru */}
             <Headlight enabled={headlightCfg.enabled} intensity={headlightCfg.intensity} />
 
             <group ref={rootRef}>
@@ -885,7 +708,6 @@ export default function ClientPage() {
               </Suspense>
             </group>
 
-            {/* Rámování až když jsou všechny modely ready */}
             <AutoCenterAndFrame
               rootRef={rootRef}
               depsKey={readyKey}
@@ -903,7 +725,7 @@ export default function ClientPage() {
         )}
       </Canvas>
 
-      {/* Globální styly */}
+      {/* Globální styly jen pro slidery (pokud nějaké debug UI přidáš) */}
       <style jsx global>{`
         .slider {
           appearance: none;
@@ -940,14 +762,6 @@ export default function ClientPage() {
           cursor: pointer;
           box-shadow: 0 0 2px black;
           border: none;
-        }
-        @media (max-width: 720px) {
-          .controls-panel {
-            left: 8px !important;
-            right: 8px;
-            width: auto !important;
-            max-width: calc(100vw - 16px) !important;
-          }
         }
       `}</style>
     </div>
