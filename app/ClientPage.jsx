@@ -11,7 +11,7 @@ import { STLLoader } from "three/examples/jsm/loaders/STLLoader"
 import { PLYLoader } from "three/examples/jsm/loaders/PLYLoader"
 
 /* ---------- Konstanty ---------- */
-const LIVE_MSG_TYPE = "SHADE3D_LIVE"
+const LIVE_MSG_TYPES = new Set(["SHADE3D_LIVE", "SHADE3D_LIVE_V6", "SHADE3D_LIVE_V5"])
 
 /* ---------- Ikony + preload ---------- */
 const ICONS = {
@@ -47,11 +47,6 @@ function inferExt(nameOrUrl) {
   const s = nameOrUrl.split("?")[0]
   const m = s.match(/\.([a-z0-9]+)$/i)
   return m ? m[1].toLowerCase() : ""
-}
-const parseVec3 = (s) => {
-  if (!s) return null
-  const p = s.split(",").map(Number)
-  return (p.length === 3 && p.every(isFinite)) ? /** @type {[number,number,number]} */([p[0], p[1], p[2]]) : null
 }
 
 /* ---------- Auto Smooth ---------- */
@@ -328,13 +323,12 @@ function TouchTrackballControls({ target = [0, 0, 0] }) {
 
   return null
 }
-
 /* ---------- AutoCenter & AutoFrame (opravené) ---------- */
 function AutoCenterAndFrame({
   rootRef, depsKey, setTarget,
   margin = 1.2, isMobile = false, desktopScale = 0.4, mobileScale = 1.0,
   centerMode = "combined",
-  shouldFrame,
+  shouldFrame, // ref z parentu – říká, jestli máme znovu rámovat
 }) {
   const { camera, size } = useThree()
 
@@ -377,6 +371,7 @@ function AutoCenterAndFrame({
     after.getSize(dims2)
     after.getCenter(ctr)
 
+    // fit pro ortho kameru pomocí zoomu
     const objW = Math.max(dims2.x, 1e-6)
     const objH = Math.max(dims2.y, 1e-6)
     const zoomX = size.width / (objW * margin)
@@ -384,6 +379,7 @@ function AutoCenterAndFrame({
     let newZoom = Math.min(zoomX, zoomY)
     newZoom *= isMobile ? mobileScale : desktopScale
 
+    // bezpečná vzdálenost (aby near/far nic „neukusoval“)
     const diag = Math.sqrt(dims2.x * dims2.x + dims2.y * dims2.y + dims2.z * dims2.z)
     const safeDist = Math.max(diag * 2.5, 1000)
 
@@ -393,6 +389,7 @@ function AutoCenterAndFrame({
     camera.position.set(ctr.x, ctr.y, ctr.z + safeDist)
     camera.updateProjectionMatrix()
 
+    // po dorámování zamknout, dokud se opravdu nezmění soubory
     shouldFrame.current = false
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [depsKey, size.width, size.height, isMobile, desktopScale, mobileScale, margin, centerMode])
@@ -428,23 +425,6 @@ function ColorSwatch({ color, onChange, ariaLabel }) {
       )}
     </div>
   )
-}
-
-/* ---------- Jednorázové použití počáteční kamery ---------- */
-function ApplyInitialCamera({ pos, target, zoom, onApplied }) {
-  const { camera } = useThree()
-  const appliedRef = useRef(false)
-  useEffect(() => {
-    if (appliedRef.current) return
-    if (!pos || !target || !isFinite(zoom)) return
-    // nastavení ortho kamery
-    camera.position.set(pos[0], pos[1], pos[2])
-    camera.zoom = zoom
-    camera.updateProjectionMatrix()
-    appliedRef.current = true
-    onApplied?.()
-  }, [camera, pos, target, zoom, onApplied])
-  return null
 }
 
 /* ---------- ClientPage (Viewer) ---------- */
@@ -497,9 +477,6 @@ export default function ClientPage() {
   const cameraStateRef = useRef({ position: [0,0,1000], target: [0,0,0], zoom: 1 })
 
   const getFileKeys = (arr) => (arr || []).map(f => `${f.url}::${f.rawName || f.name}`)
-
-  // ⤵️ NEW: inicializační kamera (z manifestu/URL)
-  const [initialCam, setInitialCam] = useState/** @type|null */(null)
 
   // INIT: manifest / files param
   useEffect(() => {
@@ -554,27 +531,8 @@ export default function ClientPage() {
             })
           }
 
-          // Kamera z manifestu + override z URL
-          let camPos = m?.camera?.position ?? null
-          let camTarget = m?.camera?.target ?? null
-          let camZoom = typeof m?.camera?.zoom === "number" ? m.camera.zoom : null
-          const qpPos = parseVec3(getParam("camPos"))
-          const qpTarget = parseVec3(getParam("camTarget"))
-          const qpZoom = parseFloat(getParam("camZoom") ?? "NaN")
-          if (qpPos) camPos = qpPos
-          if (qpTarget) camTarget = qpTarget
-          if (isFinite(qZoom(qpZoom))) camZoom = qpZoom
-          const frameParam = getParam("frame")
-          const frameOff = (m?.camera?.frame === false) || (frameParam != null && frameParam === "0")
-          if (camPos && camTarget && isFinite(camZoom)) {
-            shouldFrameRef.current = false
-            setCameraTarget(camTarget)
-            setInitialCam({ pos: camPos, target: camTarget, zoom: camZoom })
-          } else if (frameOff) {
-            shouldFrameRef.current = false
-          }
-
           prevFileKeysRef.current = getFileKeys(Fs)
+          shouldFrameRef.current = true
           return
         }
 
@@ -610,28 +568,14 @@ export default function ClientPage() {
             width: parseInt(getParam("logoWidth") ?? (window.innerWidth < 768 ? "120" : "160"), 10),
             pos: getParam("logoPos") || "bc",
           })
-
           const qOn = getParam('headlight')
           const qI = parseFloat(getParam('headlightI') ?? 'NaN')
           setHeadlightCfg({
             enabled: qOn == null ? true : qOn !== '0',
             intensity: isFinite(qI) ? qI : 2.0,
           })
-
-          // Kamera čistě z URL
-          const camPos = parseVec3(getParam("camPos"))
-          const camTarget = parseVec3(getParam("camTarget"))
-          const camZoom = parseFloat(getParam("camZoom") ?? "NaN")
-          const frameOff = getParam("frame") === "0"
-          if (camPos && camTarget && isFinite(camZoom)) {
-            shouldFrameRef.current = false
-            setCameraTarget(camTarget)
-            setInitialCam({ pos: camPos, target: camTarget, zoom: camZoom })
-          } else if (frameOff) {
-            shouldFrameRef.current = false
-          }
-
           prevFileKeysRef.current = getFileKeys(Fs)
+          shouldFrameRef.current = true
           return
         }
 
@@ -647,47 +591,48 @@ export default function ClientPage() {
         setFatal("Tento náhled není dostupný (chyba při načtení dat).")
       }
     })()
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
-
-  // Pomocná funkce na validaci čísla
-  function qZoom(v){ return v }
-
   /* ──────────────── LIVE MODE: posluchač postMessage ──────────────── */
   const applyLivePayload = (p) => {
-    if (!p || !Array.isArray(p.files)) return
+    if (!p) return
 
-    // 1) Pokud se změnily samotné soubory (URL/počet), dovolíme jedno nové zarámování
-    const newFiles = p.files.map((x, i) => ({
-      url: x.u,
-      name: stripExt(x.n || `Model ${i + 1}`),
-      rawName: x.n || `Model${i + 1}`,
-      c: x.c,
-      o: typeof x.o === "number" ? clamp01(x.o) : 1,
-      v: typeof x.v === "boolean" ? x.v : true,
-      r: typeof x.r === "number" ? clamp01(x.r) : 0.5,
-      m: typeof x.m === "number" ? clamp01(x.m) : 0.5,
-      vc: !!x.vc,
-      km: !!x.km,
-    }))
+    // 1) Files jsou VOLITELNÉ – zpracuj jen když dorazí
+    let filesActuallyChanged = false
+    if (Array.isArray(p.files)) {
+      const newFiles = p.files.map((x, i) => ({
+        url: x.u,
+        name: stripExt(x.n || `Model ${i + 1}`),
+        rawName: x.n || `Model${i + 1}`,
+        c: x.c,
+        o: typeof x.o === "number" ? clamp01(x.o) : 1,
+        v: typeof x.v === "boolean" ? x.v : true,
+        r: typeof x.r === "number" ? clamp01(x.r) : 0.5,
+        m: typeof x.m === "number" ? clamp01(x.m) : 0.5,
+        vc: !!x.vc,
+        km: !!x.km,
+      }))
 
-    const newKeys = newFiles.map(f => `${f.url}::${f.rawName || f.name}`)
-    const prevKeys = prevFileKeysRef.current
-    const filesActuallyChanged =
-      newKeys.length !== prevKeys.length ||
-      newKeys.some((k, i) => k !== prevKeys[i])
+      const newKeys = newFiles.map(f => `${f.url}::${f.rawName || f.name}`)
+      const prevKeys = prevFileKeysRef.current
+      filesActuallyChanged =
+        newKeys.length !== prevKeys.length ||
+        newKeys.some((k, i) => k !== prevKeys[i])
 
-    setFiles(newFiles)
-    prevFileKeysRef.current = newKeys
+      setFiles(newFiles)
+      prevFileKeysRef.current = newKeys
 
-    const palette = ["#f5f5dc", "#8e8e8e", "#ffffff", "#ffd7a8", "#c0c0c0", "#e6f0ff", "#ffeedd"]
-    setColors(newFiles.map((f, i) => f.c || palette[i % palette.length]))
-    setOpacities(newFiles.map((f) => f.o))
-    setVisibles(newFiles.map((f) => f.v))
-    setRoughnesses(newFiles.map((f) => f.r))
-    setMetalnesses(newFiles.map((f) => f.m))
+      const palette = ["#f5f5dc", "#8e8e8e", "#ffffff", "#ffd7a8", "#c0c0c0", "#e6f0ff", "#ffeedd"]
+      setColors(newFiles.map((f, i) => f.c || palette[i % palette.length]))
+      setOpacities(newFiles.map((f) => f.o))
+      setVisibles(newFiles.map((f) => f.v))
+      setRoughnesses(newFiles.map((f) => f.r))
+      setMetalnesses(newFiles.map((f) => f.m))
+    }
 
-    if (typeof p.title === "string" || p.title === null) setTitle(p.title ?? null)
+    // 2) Title / Logo – fungují i bez files
+    if (typeof p.title === "string" || p.title === null) {
+      setTitle(p.title ?? null)
+    }
     if (p.logo) {
       setLogoCfg((old) => ({
         url: p.logo?.url ?? old.url,
@@ -696,6 +641,8 @@ export default function ClientPage() {
         pos: p.logo?.pos || old.pos,
       }))
     }
+
+    // 3) Lights – fungují i bez files
     if (p.lights) {
       if (typeof p.lights.intensity === "number") setLightIntensity(p.lights.intensity)
       if (p.lights.headlight) {
@@ -706,7 +653,7 @@ export default function ClientPage() {
       }
     }
 
-    // 2) Reframe pouze když se změnily soubory
+    // 4) Dorámování jen při změně modelů
     shouldFrameRef.current = filesActuallyChanged
     if (filesActuallyChanged) setLoadedCount(0)
   }
@@ -714,28 +661,12 @@ export default function ClientPage() {
   useEffect(() => {
     const onMsg = (e) => {
       const data = e.data
-      if (data && data.type === LIVE_MSG_TYPE && data.payload) {
+      if (data && LIVE_MSG_TYPES.has(data.type) && data.payload) {
         applyLivePayload(data.payload)
       }
     }
     window.addEventListener("message", onMsg)
     return () => window.removeEventListener("message", onMsg)
-  }, [])
-
-  // ⤵️ NEW: posílej rodiči stav kamery pro round-trip do uploaderu
-  useEffect(() => {
-    let tid = /** @type {any} */(null)
-    const tick = () => {
-      try {
-        window.parent?.postMessage({
-          type: "SHADE3D_CAMSTATE",
-          payload: cameraStateRef.current
-        }, "*")
-      } catch {}
-      tid = setTimeout(tick, 120)
-    }
-    tick()
-    return () => clearTimeout(tid)
   }, [])
 
   // LOGO – pod modelem (z-index 0, Canvas má 1, UI má 2)
@@ -751,7 +682,7 @@ export default function ClientPage() {
         transform: logoCfg.pos === "bc" ? "translateX(-50%)" : "none",
         width: logoCfg.width,
         opacity: logoCfg.opacity,
-        zIndex: 0,
+        zIndex: 0,               // <- důležité: pod 3D canvasem
         pointerEvents: "none",
         userSelect: "none",
         filter: "drop-shadow(0 0 1px rgba(0,0,0,.25))",
@@ -780,12 +711,22 @@ export default function ClientPage() {
     return null
   }
 
+  // když se domodelovalo vše, dovolíme první/další dorámování (pokud je povoleno)
+  useEffect(() => {
+    if (files.length > 0 && loadedCount === files.length) {
+      // pouze v případě, že o to někdo explicitně požádal (nové soubory)
+      // jinak necháváme uživatelskou pozici a zoom
+    }
+  }, [files.length, loadedCount])
+
   // když přijde změna, která má rámovat, přepočítáme depsKey (použije se v AutoCenterAndFrame)
   const frameDepsKey =
     shouldFrameRef.current
       ? `frame-${files.length}-${loadedCount}`
       : `noframe-${files.length}-${loadedCount}`
 
+  // když uživatel posune kameru, Trackball si drží target interně; pro AutoCenterAndFrame mu posíláme náš cameraTarget.
+  // ten aktualizujeme pouze v AutoCenterAndFrame (po dorámování).
   const fillDim = headlightCfg.enabled ? 0.5 : 1
 
   return (
@@ -801,7 +742,7 @@ export default function ClientPage() {
         className="controls-panel"
         style={{
           position: "absolute",
-          top: 10, left: 10, zIndex: 2,
+          top: 10, left: 10, zIndex: 2, // <- nad 3D
           color: "white", fontFamily: "sans-serif", fontSize: "14px",
           opacity: uiReady ? 1 : 0, transition: "opacity .12s ease",
           backdropFilter: "blur(3px)", background: "rgba(0,0,0,.25)",
@@ -828,7 +769,7 @@ export default function ClientPage() {
               </div>
             )}
 
-            {/* Přehled souborů (jen eye + barva + opacity slider) */}
+            {/* Přehled souborů (jen eye + barva + opacity slider, pro demo; realtime mění stav) */}
             {files.map((f, i) => (
               <div key={i} className="control-row" style={{
                 display: "grid", gridTemplateColumns: "36px 1fr 26px",
@@ -903,25 +844,12 @@ export default function ClientPage() {
       >
         {!fatal && (
           <>
-            {/* Případná počáteční kamera – nastaví se jednorázově a nezasahuje pak do interakce */}
-            {initialCam && (
-              <ApplyInitialCamera
-                pos={initialCam.pos}
-                target={initialCam.target}
-                zoom={initialCam.zoom}
-                onApplied={() => {
-                  // Po nastavení kamery ještě dorovnej trackball target a ulož target pro CameraStateKeeper
-                  setCameraTarget(initialCam.target)
-                }}
-              />
-            )}
-
-            <ambientLight intensity={lightIntensity * 0.4 * fillDim} />
+            <ambientLight intensity={lightIntensity * 0.4 * (headlightCfg.enabled ? 0.5 : 1)} />
             {/* Jednoduché fill/key směrovky */}
-            <directionalLight position={[0, 5, 5]} intensity={lightIntensity * 1.5 * fillDim} />
-            <directionalLight position={[-10, 0, 0]} intensity={lightIntensity * 1.0 * fillDim} />
-            <directionalLight position={[10, 0, 0]} intensity={lightIntensity * 1.2 * fillDim} />
-            <directionalLight position={[0, -5, -5]} intensity={lightIntensity * 0.8 * fillDim} />
+            <directionalLight position={[0, 5, 5]} intensity={lightIntensity * 1.5 * (headlightCfg.enabled ? 0.5 : 1)} />
+            <directionalLight position={[-10, 0, 0]} intensity={lightIntensity * 1.0 * (headlightCfg.enabled ? 0.5 : 1)} />
+            <directionalLight position={[10, 0, 0]} intensity={lightIntensity * 1.2 * (headlightCfg.enabled ? 0.5 : 1)} />
+            <directionalLight position={[0, -5, -5]} intensity={lightIntensity * 0.8 * (headlightCfg.enabled ? 0.5 : 1)} />
 
             {/* Headlight (u kamery) */}
             <Headlight enabled={headlightCfg.enabled} intensity={headlightCfg.intensity} />
@@ -952,7 +880,7 @@ export default function ClientPage() {
             {/* Dorámování pouze pokud shouldFrameRef.current === true */}
             <AutoCenterAndFrame
               rootRef={rootRef}
-              depsKey={frameDepsKey}
+              depsKey={shouldFrameRef.current ? `frame-${files.length}-${loadedCount}` : `noframe-${files.length}-${loadedCount}`}
               setTarget={setCameraTarget}
               margin={1.2}
               isMobile={isMobile}
