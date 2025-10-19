@@ -670,7 +670,7 @@ export default function ClientPage() {
         transform: logoCfg.pos === "bc" ? "translateX(-50%)" : "none",
         width: logoCfg.width,
         opacity: logoCfg.opacity,
-        zIndex: 0, // POD Canvasem => model je nad logem
+        zIndex: 3, // nad Canvasem
         pointerEvents: "none",
         userSelect: "none",
         filter: "drop-shadow(0 0 1px rgba(0,0,0,.25))",
@@ -847,4 +847,5 @@ export default function ClientPage() {
     </div>
   )
 }
+
 
