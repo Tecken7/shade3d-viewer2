@@ -26,8 +26,10 @@ function PreloadIcons() {
   return null
 }
 
-/* ---------- Helpers ---------- */
+/* ---------- Live messaging ---------- */
 const LIVE_MSG_TYPE = "SHADE3D_LIVE_V2"
+
+/* ---------- Helpers ---------- */
 const DEFAULT_LOGO = "/Arthetic_logo.png"
 const stripExt = (s) => s?.replace(/\.[^.]+$/, "") || ""
 const clamp01 = (x) => Math.max(0, Math.min(1, x))
@@ -47,22 +49,10 @@ function inferExt(nameOrUrl) {
   return m ? m[1].toLowerCase() : ""
 }
 
-/* ---------- Blob housekeeping pro live režim ---------- */
-const liveBlobsRef = { current: [] }
-function revokeLiveBlobs() {
-  for (const url of liveBlobsRef.current) {
-    try {
-      URL.revokeObjectURL(url)
-    } catch {}
-  }
-  liveBlobsRef.current = []
-}
-
 /* ---------- Auto Smooth ---------- */
 function autoSmoothGeometry(geometry, angleDeg = 30) {
   const angle = Math.max(0, Math.min(89.9, angleDeg))
   const angleRad = (angle * Math.PI) / 180
-
   const g = geometry.index ? geometry.toNonIndexed() : geometry.clone()
   const pos = g.getAttribute("position")
   const vCount = pos.count
@@ -287,7 +277,7 @@ function Headlight({ enabled = true, intensity = 2, color = "#ffffff" }) {
   )
 }
 
-/* ---------- Trackball (opravený pan pravým) ---------- */
+/* ---------- Trackball ---------- */
 function TouchTrackballControls({ target = [0, 0, 0] }) {
   const { camera, gl } = useThree()
   const controlsRef = useRef(null)
@@ -298,31 +288,14 @@ function TouchTrackballControls({ target = [0, 0, 0] }) {
     controls.zoomSpeed = 1.2
     controls.panSpeed = 1.0
     controls.staticMoving = true
-
-    // PRAVÉ TLAČÍTKO = PAN
-    controls.mouseButtons = {
-      LEFT: THREE.MOUSE.ROTATE,
-      MIDDLE: THREE.MOUSE.ZOOM,
-      RIGHT: THREE.MOUSE.PAN,
-    }
-
-    // aby pravé tlačítko neotvíralo kontextové menu
-    const preventContext = (e) => e.preventDefault()
-    gl.domElement.addEventListener("contextmenu", preventContext)
-    gl.domElement.style.touchAction = "none"
-
     controlsRef.current = controls
-
-    // touch listeners s passive: false
     const ts = (e) => { e.preventDefault(); controls.handleTouchStart(e) }
     const tm = (e) => { e.preventDefault(); controls.handleTouchMove(e) }
     gl.domElement.addEventListener("touchstart", ts, { passive: false })
     gl.domElement.addEventListener("touchmove", tm, { passive: false })
-
     return () => {
       gl.domElement.removeEventListener("touchstart", ts)
       gl.domElement.removeEventListener("touchmove", tm)
-      gl.domElement.removeEventListener("contextmenu", preventContext)
       controls.dispose()
     }
   }, [camera, gl])
@@ -436,7 +409,7 @@ function ColorSwatch({ color, onChange, ariaLabel }) {
 
 /* ---------- ClientPage (Viewer) ---------- */
 export default function ClientPage() {
-  // světla – pevné, ovládání přes manifest/URL/LIVE
+  // světla – pevné, ovládání přes manifest/URL, ne přes UI
   const [lightIntensity, setLightIntensity] = useState(1)
   const [headlightCfg, setHeadlightCfg] = useState({ enabled: true, intensity: 2.0 })
 
@@ -478,7 +451,7 @@ export default function ClientPage() {
   const centerParam = (getParam("center") || "combined").toLowerCase()
   const centerMode = ["per", "combined", "none"].includes(centerParam) ? centerParam : "combined"
 
-  // INIT: manifest / files param (původní logika)
+  // INIT (manifest / files param)
   useEffect(() => {
     ;(async () => {
       try {
@@ -571,13 +544,19 @@ export default function ClientPage() {
           return
         }
 
-        // dev fallback — prázdno (nechceme načítat staré modely z /models)
-        setFiles([])
-        setColors([])
-        setOpacities([])
-        setVisibles([])
-        setRoughnesses([])
-        setMetalnesses([])
+        // dev fallback
+        const Fs = [
+          { url: "/models/Upper.obj", name: "Upper", rawName: "Upper.obj", r: 0.5, m: 0.5, v: true, vc: false, km: false },
+          { url: "/models/Lower.stl", name: "Lower", rawName: "Lower.stl", r: 0.5, m: 0.5, v: true, vc: false, km: false },
+          { url: "/models/Crown21.ply", name: "Bridge", rawName: "Crown21.ply", r: 0.5, m: 0.5, v: true, vc: false, km: false },
+        ]
+        setFiles(Fs)
+        const palette = ["#f5f5dc", "#8e8e8e", "#ffffff"]
+        setColors(Fs.map((_, i) => palette[i % palette.length]))
+        setOpacities(Fs.map(() => 1))
+        setVisibles(Fs.map((f) => f.v))
+        setRoughnesses(Fs.map((f) => f.r))
+        setMetalnesses(Fs.map((f) => f.m))
       } catch (e) {
         console.error(e)
         setFatal("Tento náhled není dostupný (chyba při načtení dat).")
@@ -585,47 +564,32 @@ export default function ClientPage() {
     })()
   }, [])
 
-  /* ──────────────── LIVE MODE: posluchač postMessage ──────────────── */
-  function applyParamArrayToState(paramArr, setState, key, files) {
-    if (!Array.isArray(paramArr)) return
-    setState((prev) => {
-      const next = [...prev]
-      const indexByRaw = new Map(files.map((f, i) => [f.rawName || f.name, i]))
-      for (let i = 0; i < paramArr.length; i++) {
-        const p = paramArr[i]
-        if (!p) continue
-        let idx = -1
-        if (p.n && indexByRaw.has(p.n)) idx = indexByRaw.get(p.n)
-        else if (i < files.length) idx = i
-        if (idx >= 0 && idx < next.length) {
-          const val = p[key]
-          if (key === "o" || key === "r" || key === "m") {
-            if (typeof val === "number") next[idx] = clamp01(val)
-          } else if (key === "c" && typeof val === "string") {
-            next[idx] = val
-          } else if (key === "v") {
-            next[idx] = !!val
-          }
-        }
-      }
-      return next
-    })
-  }
+  /* ──────────────── LIVE: helper na převod ArrayBuffer -> objectURL ──────────────── */
+  const binToObjectUrl = (buf, mime) => URL.createObjectURL(new Blob([buf], { type: mime || "application/octet-stream" }))
 
+  /* ──────────────── LIVE MODE: posluchač postMessage ──────────────── */
   const applyLivePayload = (p) => {
     if (!p) return
 
-    // 1) jen světla/titulek/logo
+    // 1) onlyLights – bez recenteru, jen světla/title/logo
     if (p.onlyLights) {
-      if (p.title !== undefined) setTitle(p.title ?? null)
+      if (typeof p.title === "string" || p.title === null) setTitle(p.title ?? null)
+
       if (p.logo) {
-        setLogoCfg((old) => ({
-          url: p.logo?.url ?? old.url,
-          opacity: typeof p.logo?.opacity === "number" ? clamp01(p.logo.opacity) : old.opacity,
-          width: typeof p.logo?.width === "number" ? p.logo.width : old.width,
-          pos: p.logo?.pos || old.pos,
-        }))
+        setLogoCfg((old) => {
+          let url = old.url
+          if (p.logo.bin) {
+            try { url = binToObjectUrl(p.logo.bin, p.logo.mime) } catch {}
+          }
+          return {
+            url,
+            opacity: typeof p.logo.opacity === "number" ? clamp01(p.logo.opacity) : old.opacity,
+            width: typeof p.logo.width === "number" ? p.logo.width : old.width,
+            pos: p.logo.pos || old.pos,
+          }
+        })
       }
+
       if (p.lights) {
         if (typeof p.lights.intensity === "number") setLightIntensity(p.lights.intensity)
         if (p.lights.headlight) {
@@ -638,36 +602,51 @@ export default function ClientPage() {
       return
     }
 
-    // 2) jen parametry modelů
+    // 2) onlyParams – nepřepisuj files; mapuj podle názvu (rawName || name)
     if (p.onlyParams && Array.isArray(p.files)) {
-      applyParamArrayToState(p.files, setColors, "c", files)
-      applyParamArrayToState(p.files, setOpacities, "o", files)
-      applyParamArrayToState(p.files, setVisibles, "v", files)
-      applyParamArrayToState(p.files, setRoughnesses, "r", files)
-      applyParamArrayToState(p.files, setMetalnesses, "m", files)
+      const nameToIndex = new Map()
+      files.forEach((f, i) => {
+        nameToIndex.set(f.rawName || f.name, i)
+      })
 
-      if (p.files.some((x) => "vc" in x || "km" in x)) {
-        setFiles((prev) =>
-          prev.map((f) => {
-            const upd = p.files.find((x) => x.n === (f.rawName || f.name))
-            if (!upd) return f
-            return {
-              ...f,
-              vc: typeof upd.vc === "boolean" ? upd.vc : f.vc,
-              km: typeof upd.km === "boolean" ? upd.km : f.km,
-            }
-          })
-        )
-      }
+      const nextColors = [...colors]
+      const nextOp = [...opacities]
+      const nextVis = [...visibles]
+      const nextR = [...roughnesses]
+      const nextM = [...metalnesses]
 
-      if (p.title !== undefined) setTitle(p.title ?? null)
+      p.files.forEach((x) => {
+        const key = x.n || x.name
+        if (!key) return
+        const idx = nameToIndex.get(key)
+        if (idx == null) return
+        if (x.c) nextColors[idx] = x.c
+        if (typeof x.o === "number") nextOp[idx] = clamp01(x.o)
+        if (typeof x.v === "boolean") nextVis[idx] = x.v
+        if (typeof x.r === "number") nextR[idx] = clamp01(x.r)
+        if (typeof x.m === "number") nextM[idx] = clamp01(x.m)
+        // vc/km by vyžadovalo přebudovat materiál – necháme na příští full update nebo doplníme dle potřeby
+      })
+
+      setColors(nextColors)
+      setOpacities(nextOp)
+      setVisibles(nextVis)
+      setRoughnesses(nextR)
+      setMetalnesses(nextM)
+
+      // volitelné doplňky (title/logo/lights) – bez recenteru
+      if (typeof p.title === "string" || p.title === null) setTitle(p.title ?? null)
       if (p.logo) {
-        setLogoCfg((old) => ({
-          url: p.logo?.url ?? old.url,
-          opacity: typeof p.logo?.opacity === "number" ? clamp01(p.logo.opacity) : old.opacity,
-          width: typeof p.logo?.width === "number" ? p.logo.width : old.width,
-          pos: p.logo?.pos || old.pos,
-        }))
+        setLogoCfg((old) => {
+          let url = old.url
+          if (p.logo.bin) { try { url = binToObjectUrl(p.logo.bin, p.logo.mime) } catch {} }
+          return {
+            url,
+            opacity: typeof p.logo.opacity === "number" ? clamp01(p.logo.opacity) : old.opacity,
+            width: typeof p.logo.width === "number" ? p.logo.width : old.width,
+            pos: p.logo.pos || old.pos,
+          }
+        })
       }
       if (p.lights) {
         if (typeof p.lights.intensity === "number") setLightIntensity(p.lights.intensity)
@@ -681,65 +660,65 @@ export default function ClientPage() {
       return
     }
 
-    // 3) plná změna (nové soubory / blob URL)
-    revokeLiveBlobs()
-    const arr = Array.isArray(p.files) ? p.files : []
-    if (!arr.length) return
+    // 3) full update – může obsahovat b (buffer) nebo u (url)
+    if (Array.isArray(p.files) && p.files.length > 0) {
+      const Fs = p.files.map((x, i) => {
+        let url = x.u
+        if (!url && x.b) {
+          // vytvoř blob URL podle typu
+          const mime =
+            x.ext === "stl" ? "model/stl" :
+            x.ext === "ply" ? "application/octet-stream" :
+            "text/plain"
+          url = binToObjectUrl(x.b, mime)
+        }
+        return {
+          url,
+          name: stripExt(x.n || `Model ${i + 1}`),
+          rawName: x.n || `Model${i + 1}`,
+          c: x.c,
+          o: typeof x.o === "number" ? clamp01(x.o) : 1,
+          v: typeof x.v === "boolean" ? x.v : true,
+          r: typeof x.r === "number" ? clamp01(x.r) : 0.5,
+          m: typeof x.m === "number" ? clamp01(x.m) : 0.5,
+          vc: !!x.vc,
+          km: !!x.km,
+        }
+      })
 
-    const Fs = arr.map((x, i) => {
-      let url = x.u
-      if (!url && x.b) {
-        const mime =
-          x.ext === "stl" ? "model/stl" :
-          x.ext === "ply" ? "application/octet-stream" :
-          "text/plain"
-        const blob = new Blob([x.b], { type: mime })
-        url = URL.createObjectURL(blob)
-        liveBlobsRef.current.push(url)
+      setFiles(Fs)
+      const palette = ["#f5f5dc", "#8e8e8e", "#ffffff", "#ffd7a8", "#c0c0c0", "#e6f0ff", "#ffeedd"]
+      setColors(Fs.map((f, i) => f.c || palette[i % palette.length]))
+      setOpacities(Fs.map((f) => f.o))
+      setVisibles(Fs.map((f) => f.v))
+      setRoughnesses(Fs.map((f) => f.r))
+      setMetalnesses(Fs.map((f) => f.m))
+      if (typeof p.title === "string" || p.title === null) setTitle(p.title ?? null)
+
+      if (p.logo) {
+        let url = logoCfg.url
+        if (p.logo.bin) { try { url = binToObjectUrl(p.logo.bin, p.logo.mime) } catch {} }
+        setLogoCfg({
+          url,
+          opacity: typeof p.logo.opacity === "number" ? clamp01(p.logo.opacity) : logoCfg.opacity,
+          width: typeof p.logo.width === "number" ? p.logo.width : logoCfg.width,
+          pos: p.logo.pos || logoCfg.pos,
+        })
       }
-      return {
-        url,
-        name: stripExt(x.n || `Model ${i + 1}`),
-        rawName: x.n || `Model${i + 1}`,
-        c: x.c,
-        o: typeof x.o === "number" ? clamp01(x.o) : 1,
-        v: typeof x.v === "boolean" ? x.v : true,
-        r: typeof x.r === "number" ? clamp01(x.r) : 0.5,
-        m: typeof x.m === "number" ? clamp01(x.m) : 0.5,
-        vc: !!x.vc,
-        km: !!x.km,
+
+      if (p.lights) {
+        if (typeof p.lights.intensity === "number") setLightIntensity(p.lights.intensity)
+        if (p.lights.headlight) {
+          setHeadlightCfg((old) => ({
+            enabled: typeof p.lights.headlight.enabled === "boolean" ? p.lights.headlight.enabled : old.enabled,
+            intensity: typeof p.lights.headlight.intensity === "number" ? p.lights.headlight.intensity : old.intensity,
+          }))
+        }
       }
-    })
 
-    setFiles(Fs)
-    const palette = ["#f5f5dc", "#8e8e8e", "#ffffff", "#ffd7a8", "#c0c0c0", "#e6f0ff", "#ffeedd"]
-    setColors(Fs.map((f, i) => f.c || palette[i % palette.length]))
-    setOpacities(Fs.map((f) => f.o))
-    setVisibles(Fs.map((f) => f.v))
-    setRoughnesses(Fs.map((f) => f.r))
-    setMetalnesses(Fs.map((f) => f.m))
-
-    if (typeof p.title === "string" || p.title === null) setTitle(p.title ?? null)
-    if (p.logo) {
-      setLogoCfg((old) => ({
-        url: p.logo?.url ?? old.url,
-        opacity: typeof p.logo?.opacity === "number" ? clamp01(p.logo.opacity) : old.opacity,
-        width: typeof p.logo?.width === "number" ? p.logo.width : old.width,
-        pos: p.logo?.pos || old.pos,
-      }))
+      // jen full update → recenter
+      setLoadedCount(0)
     }
-    if (p.lights) {
-      if (typeof p.lights.intensity === "number") setLightIntensity(p.lights.intensity)
-      if (p.lights.headlight) {
-        setHeadlightCfg((old) => ({
-          enabled: typeof p.lights.headlight.enabled === "boolean" ? p.lights.headlight.enabled : old.enabled,
-          intensity: typeof p.lights.headlight.intensity === "number" ? p.lights.headlight.intensity : old.intensity,
-        }))
-      }
-    }
-
-    // re-center jen při nové geometrii
-    setLoadedCount(0)
   }
 
   useEffect(() => {
@@ -751,7 +730,7 @@ export default function ClientPage() {
     }
     window.addEventListener("message", onMsg)
     return () => window.removeEventListener("message", onMsg)
-  }, [])
+  }, [files, colors, opacities, visibles, roughnesses, metalnesses, logoCfg])
 
   // LOGO
   const logoEl = logoCfg.url && (
@@ -782,7 +761,7 @@ export default function ClientPage() {
       <PreloadIcons />
       {logoEl}
 
-      {/* Ovládací panel – jen demo UI pro lokální testy */}
+      {/* Ovládací panel – (viewer UI) */}
       <div
         className="controls-panel"
         style={{
@@ -929,12 +908,7 @@ export default function ClientPage() {
         .slider::-moz-range-thumb { width: 14px; height: 14px; border-radius: 50%; background: white; cursor: pointer; box-shadow: 0 0 2px black; border: none; }
 
         @media (max-width: 720px) {
-          .controls-panel {
-            left: 8px !important;
-            right: 8px;
-            width: auto !important;
-            max-width: calc(100vw - 16px) !important;
-          }
+          .controls-panel { left: 8px !important; right: 8px; width: auto !important; max-width: calc(100vw - 16px) !important; }
         }
       `}</style>
     </div>
