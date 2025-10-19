@@ -13,20 +13,30 @@ import { PLYLoader } from "three/examples/jsm/loaders/PLYLoader"
 /* ---------- Ikony + preload ---------- */
 const ICONS = { eye: "/icons/Eye.png", eyeOff: "/icons/Eye-off.png" }
 function PreloadIcons() {
-  useEffect(() => { Object.values(ICONS).forEach((src) => { const img = new Image(); img.decoding = "async"; img.src = src }) }, [])
+  useEffect(() => {
+    Object.values(ICONS).forEach((src) => {
+      const img = new Image()
+      img.decoding = "async"
+      img.src = src
+    })
+  }, [])
   return null
 }
 
 /* ---------- Helpers ---------- */
 const DEFAULT_LOGO = "/Arthetic_logo.png"
-const stripExt = (s: any) => s?.replace(/\.[^.]+$/, "") || ""
-const clamp01 = (x: number) => Math.max(0, Math.min(1, x))
-const getParam = (name: string) => {
+const stripExt = (s) => (s ? s.replace(/\.[^.]+$/, "") : "") || ""
+const clamp01 = (x) => Math.max(0, Math.min(1, x))
+const getParam = (name) => {
   if (typeof window === "undefined") return null
   return new URL(window.location.href).searchParams.get(name)
 }
-async function fetchJSON(url: string) { const r = await fetch(url, { cache: "no-store" }); if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json() }
-function inferExt(nameOrUrl: string) {
+async function fetchJSON(url) {
+  const r = await fetch(url, { cache: "no-store" })
+  if (!r.ok) throw new Error(`HTTP ${r.status}`)
+  return r.json()
+}
+function inferExt(nameOrUrl) {
   if (!nameOrUrl) return ""
   const s = nameOrUrl.split("?")[0]
   const m = s.match(/\.([a-z0-9]+)$/i)
@@ -37,50 +47,99 @@ function inferExt(nameOrUrl: string) {
 const LIVE_MSG_TYPE = "SHADE3D_LIVE_STATE"
 
 /* ---------- Auto Smooth ---------- */
-function autoSmoothGeometry(geometry: any, angleDeg = 30) {
+function autoSmoothGeometry(geometry, angleDeg = 30) {
   const angle = Math.max(0, Math.min(89.9, angleDeg))
   const angleRad = (angle * Math.PI) / 180
+
   const g = geometry.index ? geometry.toNonIndexed() : geometry.clone()
   const pos = g.getAttribute("position")
   const vCount = pos.count
   const triCount = vCount / 3
+
   const faceNormals = new Array(triCount)
-  const a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3()
-  const cb = new THREE.Vector3(), ab = new THREE.Vector3()
+  const a = new THREE.Vector3(),
+    b = new THREE.Vector3(),
+    c = new THREE.Vector3()
+  const cb = new THREE.Vector3(),
+    ab = new THREE.Vector3()
   for (let f = 0; f < triCount; f++) {
-    const i0 = f * 3, i1 = i0 + 1, i2 = i0 + 2
-    a.fromBufferAttribute(pos, i0); b.fromBufferAttribute(pos, i1); c.fromBufferAttribute(pos, i2)
-    cb.subVectors(c, b); ab.subVectors(a, b); cb.cross(ab).normalize()
+    const i0 = f * 3,
+      i1 = i0 + 1,
+      i2 = i0 + 2
+    a.fromBufferAttribute(pos, i0)
+    b.fromBufferAttribute(pos, i1)
+    c.fromBufferAttribute(pos, i2)
+    cb.subVectors(c, b)
+    ab.subVectors(a, b)
+    cb.cross(ab).normalize()
     faceNormals[f] = cb.clone()
   }
+
   const groups = new Map()
-  const keyOf = (ix: number) => `${pos.getX(ix).toFixed(5)},${pos.getY(ix).toFixed(5)},${pos.getZ(ix).toFixed(5)}`
-  for (let i = 0; i < vCount; i++) { const k = keyOf(i); let arr: any = groups.get(k); if (!arr) { arr = []; groups.set(k, arr) } arr.push(i) }
+  const keyOf = (ix) =>
+    `${pos.getX(ix).toFixed(5)},${pos.getY(ix).toFixed(5)},${pos.getZ(ix).toFixed(5)}`
+  for (let i = 0; i < vCount; i++) {
+    const k = keyOf(i)
+    let arr = groups.get(k)
+    if (!arr) {
+      arr = []
+      groups.set(k, arr)
+    }
+    arr.push(i)
+  }
+
   const normals = new Float32Array(vCount * 3)
   const tmp = new THREE.Vector3()
   const cosThresh = Math.cos(angleRad)
-  ;(groups as any).forEach((cornerIndices: number[]) => {
-    const localFaceNs = cornerIndices.map((ci) => faceNormals[Math.floor(ci / 3)])
+
+  groups.forEach((cornerIndices) => {
+    const localFaceNs = cornerIndices.map(
+      (ci) => faceNormals[Math.floor(ci / 3)]
+    )
     for (let idx = 0; idx < cornerIndices.length; idx++) {
-      const ci = cornerIndices[idx]; const nRef = localFaceNs[idx]
-      let nx = 0, ny = 0, nz = 0
+      const ci = cornerIndices[idx]
+      const nRef = localFaceNs[idx]
+      let nx = 0,
+        ny = 0,
+        nz = 0
       for (let j = 0; j < localFaceNs.length; j++) {
-        const nj = localFaceNs[j]; if (nRef.dot(nj) >= cosThresh) { nx += nj.x; ny += nj.y; nz += nj.z }
+        const nj = localFaceNs[j]
+        if (nRef.dot(nj) >= cosThresh) {
+          nx += nj.x
+          ny += nj.y
+          nz += nj.z
+        }
       }
-      tmp.set(nx, ny, nz); if (tmp.lengthSq() === 0) tmp.copy(nRef); tmp.normalize()
-      const w = ci * 3; normals[w] = tmp.x; normals[w + 1] = tmp.y; normals[w + 2] = tmp.z
+      tmp.set(nx, ny, nz)
+      if (tmp.lengthSq() === 0) tmp.copy(nRef)
+      tmp.normalize()
+      const w = ci * 3
+      normals[w] = tmp.x
+      normals[w + 1] = tmp.y
+      normals[w + 2] = tmp.z
     }
   })
+
   g.setAttribute("normal", new THREE.BufferAttribute(normals, 3))
-  g.computeBoundingBox(); g.computeBoundingSphere()
+  g.computeBoundingBox()
+  g.computeBoundingSphere()
   return g
 }
 
 /* ---------- Loader (overlay) ---------- */
-function InlineLoader({ text }: { text?: string }) {
+function InlineLoader({ text }) {
   return (
     <Html center>
-      <div style={{ background: "rgba(0,0,0,0.7)", padding: "16px 28px", borderRadius: 10, color: "white", fontFamily: "sans-serif", fontSize: 16 }}>
+      <div
+        style={{
+          background: "rgba(0,0,0,0.7)",
+          padding: "16px 28px",
+          borderRadius: 10,
+          color: "white",
+          fontFamily: "sans-serif",
+          fontSize: 16,
+        }}
+      >
         ⏳ {text || "Načítám…"}
       </div>
     </Html>
@@ -89,14 +148,20 @@ function InlineLoader({ text }: { text?: string }) {
 
 /* ---------- AnyModel ---------- */
 function AnyModel({
-  name, url,
-  color, opacity, visible,
-  onLoaded, autoSmooth, smoothAngle,
-  roughness = 0.5, metalness = 0.5,
+  name,
+  url,
+  color,
+  opacity,
+  visible,
+  onLoaded,
+  autoSmooth,
+  smoothAngle,
+  roughness = 0.5,
+  metalness = 0.5,
   useVertexColors = false,
   keepMaterials = false,
-}: any) {
-  const [object3D, setObject3D] = useState<any>(null)
+}) {
+  const [object3D, setObject3D] = useState(null)
   const [loading, setLoading] = useState(true)
   const ext = useMemo(() => inferExt(name || url), [name, url])
 
@@ -117,45 +182,54 @@ function AnyModel({
     setLoading(true)
     ;(async () => {
       try {
-        let obj: any
+        let obj
         if (ext === "stl") {
-          const geom: any = await new STLLoader().loadAsync(url)
+          const geom = await new STLLoader().loadAsync(url)
           if (!geom.attributes.normal) geom.computeVertexNormals()
-          const base = autoSmooth ? autoSmoothGeometry(geom, smoothAngle) : (geom.computeVertexNormals(), geom)
+          const base = autoSmooth
+            ? autoSmoothGeometry(geom, smoothAngle)
+            : (geom.computeVertexNormals(), geom)
           const mat = makeMat()
           obj = new THREE.Mesh(base, mat)
           obj.userData._baseGeom = geom
           obj.userData._derivedGeom = base
         } else if (ext === "ply") {
-          const geom: any = await new PLYLoader().loadAsync(url)
+          const geom = await new PLYLoader().loadAsync(url)
           const hasVC = !!geom.getAttribute("color")
           let base = geom
           if (autoSmooth) base = autoSmoothGeometry(geom, smoothAngle)
           else if (!geom.attributes.normal) geom.computeVertexNormals()
-          const mat = hasVC && useVertexColors
-            ? makeMat({ vertexColors: true, color: new THREE.Color("#ffffff") })
-            : makeMat()
+
+          const mat =
+            hasVC && useVertexColors
+              ? makeMat({ vertexColors: true, color: new THREE.Color("#ffffff") })
+              : makeMat()
+
           obj = new THREE.Mesh(base, mat)
           obj.userData._baseGeom = geom
           obj.userData._derivedGeom = base
         } else {
-          const loaded: any = await new OBJLoader().loadAsync(url)
+          const loaded = await new OBJLoader().loadAsync(url)
           if (keepMaterials) {
-            loaded.traverse((child: any) => {
+            loaded.traverse((child) => {
               if (child.isMesh) {
                 const mat = child.material
                 if (mat) {
                   if ("transparent" in mat) mat.transparent = opacity < 1
                   if ("opacity" in mat) mat.opacity = opacity
-                  if ("roughness" in mat && typeof roughness === "number") mat.roughness = roughness
-                  if ("metalness" in mat && typeof metalness === "number") mat.metalness = metalness
+                  if ("roughness" in mat && typeof roughness === "number")
+                    mat.roughness = roughness
+                  if ("metalness" in mat && typeof metalness === "number")
+                    mat.metalness = metalness
                 }
               }
             })
             obj = loaded
           } else {
             const mat = makeMat()
-            loaded.traverse((child: any) => { if (child.isMesh) child.material = mat })
+            loaded.traverse((child) => {
+              if (child.isMesh) child.material = mat
+            })
             obj = loaded
           }
         }
@@ -170,20 +244,27 @@ function AnyModel({
         console.error("Model load error:", e)
       }
     })()
-    return () => { cancelled = true }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    return () => {
+      cancelled = true
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [url, ext])
 
   // AutoSmooth re-aplikace při změně
   useEffect(() => {
     if (!object3D) return
-    object3D.traverse((child: any) => {
+    object3D.traverse((child) => {
       if (!child.isMesh) return
       if (!child.userData._baseGeom) child.userData._baseGeom = child.geometry
       const base = child.userData._baseGeom
+
       let newGeom = base
       if (autoSmooth) newGeom = autoSmoothGeometry(base, smoothAngle)
-      else { newGeom = base.clone(); newGeom.computeVertexNormals() }
+      else {
+        newGeom = base.clone()
+        newGeom.computeVertexNormals()
+      }
+
       if (child.userData._derivedGeom && child.userData._derivedGeom !== base) {
         child.userData._derivedGeom.dispose()
       }
@@ -195,16 +276,19 @@ function AnyModel({
   // Materiál a vzhled – respektuje VC/keepMaterials
   useEffect(() => {
     if (!object3D) return
-    object3D.traverse((child: any) => {
+    object3D.traverse((child) => {
       if (!child.isMesh) return
       if (keepMaterials) {
         const mat = child.material
         if (mat) {
           if ("transparent" in mat) mat.transparent = opacity < 1
           if ("opacity" in mat) mat.opacity = opacity
-          if ("roughness" in mat && typeof roughness === "number") mat.roughness = roughness
-          if ("metalness" in mat && typeof metalness === "number") mat.metalness = metalness
-          if (!useVertexColors && "color" in mat && color) mat.color = new THREE.Color(color)
+          if ("roughness" in mat && typeof roughness === "number")
+            mat.roughness = roughness
+          if ("metalness" in mat && typeof metalness === "number")
+            mat.metalness = metalness
+          if (!useVertexColors && "color" in mat && color)
+            mat.color = new THREE.Color(color)
           if (useVertexColors && "vertexColors" in mat) {
             mat.vertexColors = true
             if ("color" in mat) mat.color = new THREE.Color("#ffffff")
@@ -213,9 +297,10 @@ function AnyModel({
         }
       } else {
         const hasVC = !!child.geometry.getAttribute?.("color")
-        const mat = hasVC && useVertexColors
-          ? makeMat({ vertexColors: true, color: new THREE.Color("#ffffff") })
-          : makeMat()
+        const mat =
+          hasVC && useVertexColors
+            ? makeMat({ vertexColors: true, color: new THREE.Color("#ffffff") })
+            : makeMat()
         child.material = mat
       }
     })
@@ -226,51 +311,95 @@ function AnyModel({
 }
 
 /* ---------- Headlight ---------- */
-function Headlight({ enabled = true, intensity = 2, color = "#ffffff" }: any) {
+function Headlight({ enabled = true, intensity = 2, color = "#ffffff" }) {
   const { camera } = useThree()
-  const ref = useRef<any>(null)
-  useFrame(() => { if (ref.current) ref.current.position.copy(camera.position) })
-  return <pointLight ref={ref} color={color} intensity={enabled ? intensity : 0} distance={0} decay={0} />
+  const ref = useRef(null)
+  useFrame(() => {
+    if (ref.current) ref.current.position.copy(camera.position)
+  })
+  return (
+    <pointLight
+      ref={ref}
+      color={color}
+      intensity={enabled ? intensity : 0}
+      distance={0}
+      decay={0}
+    />
+  )
 }
 
 /* ---------- Trackball ---------- */
-function TouchTrackballControls({ target = [0, 0, 0] }: any) {
+function TouchTrackballControls({ target = [0, 0, 0] }) {
   const { camera, gl } = useThree()
-  const controlsRef = useRef<any>(null)
+  const controlsRef = useRef(null)
+
   useEffect(() => {
-    const controls: any = new (TrackballControls as any)(camera, gl.domElement)
-    controls.rotateSpeed = 5.0; controls.zoomSpeed = 1.2; controls.panSpeed = 1.0; controls.staticMoving = true
+    const controls = new TrackballControls(camera, gl.domElement)
+    controls.rotateSpeed = 5.0
+    controls.zoomSpeed = 1.2
+    controls.panSpeed = 1.0
+    controls.staticMoving = true
     controlsRef.current = controls
-    const ts = (e: any) => { e.preventDefault(); controls.handleTouchStart(e) }
-    const tm = (e: any) => { e.preventDefault(); controls.handleTouchMove(e) }
+    const ts = (e) => {
+      e.preventDefault()
+      controls.handleTouchStart(e)
+    }
+    const tm = (e) => {
+      e.preventDefault()
+      controls.handleTouchMove(e)
+    }
     gl.domElement.addEventListener("touchstart", ts, { passive: false })
     gl.domElement.addEventListener("touchmove", tm, { passive: false })
-    return () => { gl.domElement.removeEventListener("touchstart", ts); gl.domElement.removeEventListener("touchmove", tm); controls.dispose() }
+    return () => {
+      gl.domElement.removeEventListener("touchstart", ts)
+      gl.domElement.removeEventListener("touchmove", tm)
+      controls.dispose()
+    }
   }, [camera, gl])
-  useEffect(() => { if (!controlsRef.current) return; controlsRef.current.target.set(target[0], target[1], target[2]); controlsRef.current.update() }, [target])
-  useFrame(() => { if (!controlsRef.current) return; if ((camera as any).isOrthographicCamera) controlsRef.current.panSpeed = (camera as any).zoom * 0.4; controlsRef.current.update() })
+
+  useEffect(() => {
+    if (!controlsRef.current) return
+    controlsRef.current.target.set(target[0], target[1], target[2])
+    controlsRef.current.update()
+  }, [target])
+
+  useFrame(() => {
+    if (!controlsRef.current) return
+    if (camera.isOrthographicCamera)
+      controlsRef.current.panSpeed = camera.zoom * 0.4
+    controlsRef.current.update()
+  })
+
   return null
 }
 
 /* ---------- AutoCenter & AutoFrame ---------- */
 function AutoCenterAndFrame({
-  rootRef, depsKey, setTarget,
-  margin = 1.2, isMobile = false, desktopScale = 0.4, mobileScale = 1.0,
+  rootRef,
+  depsKey,
+  setTarget,
+  margin = 1.2,
+  isMobile = false,
+  desktopScale = 0.4,
+  mobileScale = 1.0,
   centerMode = "combined",
-}: any) {
+}) {
   const { camera, size } = useThree()
   useEffect(() => {
     const root = rootRef.current
     if (!root) return
+
     root.updateMatrixWorld(true)
     const boxAll = new THREE.Box3().setFromObject(root)
     if (boxAll.isEmpty()) return
+
     const centerAll = new THREE.Vector3()
     const dims = new THREE.Vector3()
     boxAll.getCenter(centerAll)
     boxAll.getSize(dims)
+
     if (centerMode === "per") {
-      root.children.forEach((child: any) => {
+      root.children.forEach((child) => {
         const b = new THREE.Box3().setFromObject(child)
         if (b.isEmpty()) return
         const cWorld = new THREE.Vector3()
@@ -286,58 +415,116 @@ function AutoCenterAndFrame({
     } else {
       setTarget([centerAll.x, centerAll.y, centerAll.z])
     }
+
     const after = new THREE.Box3().setFromObject(root)
     const dims2 = new THREE.Vector3()
     const ctr = new THREE.Vector3()
     after.getSize(dims2)
     after.getCenter(ctr)
+
     const objW = Math.max(dims2.x, 1e-6)
     const objH = Math.max(dims2.y, 1e-6)
     const zoomX = size.width / (objW * margin)
     const zoomY = size.height / (objH * margin)
     let newZoom = Math.min(zoomX, zoomY)
     newZoom *= isMobile ? mobileScale : desktopScale
-    ;(camera as any).near = 0.01
-    ;(camera as any).far = 100000
-    ;(camera as any).zoom = Math.max(newZoom, 0.01)
-    ;(camera as any).position.set(ctr.x, ctr.y, ctr.z + Math.abs((camera as any).position.z))
-    ;(camera as any).updateProjectionMatrix()
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [depsKey, size.width, size.height, isMobile, desktopScale, mobileScale, margin, centerMode])
+
+    camera.near = 0.01
+    camera.far = 100000
+    camera.zoom = Math.max(newZoom, 0.01)
+    camera.position.set(ctr.x, ctr.y, ctr.z + Math.abs(camera.position.z))
+    camera.updateProjectionMatrix()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    depsKey,
+    size.width,
+    size.height,
+    isMobile,
+    desktopScale,
+    mobileScale,
+    margin,
+    centerMode,
+  ])
+
   return null
 }
 
 /* ---------- Color popover (UI) ---------- */
-function ColorSwatch({ color, onChange, ariaLabel }: any) {
+function ColorSwatch({ color, onChange, ariaLabel }) {
   const [open, setOpen] = useState(false)
-  const containerRef = useRef<any>(null)
+  const containerRef = useRef(null)
   useEffect(() => {
-    const onDocClick = (e: any) => { if (open && containerRef.current && !containerRef.current.contains(e.target)) setOpen(false) }
+    const onDocClick = (e) => {
+      if (open && containerRef.current && !containerRef.current.contains(e.target))
+        setOpen(false)
+    }
     document.addEventListener("mousedown", onDocClick)
     return () => document.removeEventListener("mousedown", onDocClick)
   }, [open])
   return (
-    <div ref={containerRef} className="swatch-wrap" style={{ position: "relative", display: "inline-block" }}>
+    <div
+      ref={containerRef}
+      className="swatch-wrap"
+      style={{ position: "relative", display: "inline-block" }}
+    >
       <button
         aria-label={ariaLabel || "color picker"}
         onClick={() => setOpen((v) => !v)}
         className="swatch-btn"
-        style={{ width: 36, height: 22, borderRadius: 4, border: "1px solid #fff", background: color, cursor: "pointer", boxShadow: "0 0 0 1px rgba(0,0,0,.25) inset" }}
+        style={{
+          width: 36,
+          height: 22,
+          borderRadius: 4,
+          border: "1px solid #fff",
+          background: color,
+          cursor: "pointer",
+          boxShadow: "0 0 0 1px rgba(0,0,0,.25) inset",
+        }}
       />
       {open && (
-        <div className="swatch-pop" style={{ position: "absolute", zIndex: 20, top: 28, left: 0, background: "rgba(0,0,0,.92)", padding: 12, borderRadius: 10, border: "1px solid rgba(255,255,255,.18)", backdropFilter: "blur(4px)", boxShadow: "0 6px 24px rgba(0,0,0,.35)" }}>
+        <div
+          className="swatch-pop"
+          style={{
+            position: "absolute",
+            zIndex: 20,
+            top: 28,
+            left: 0,
+            background: "rgba(0,0,0,.92)",
+            padding: 12,
+            borderRadius: 10,
+            border: "1px solid rgba(255,255,255,.18)",
+            backdropFilter: "blur(4px)",
+            boxShadow: "0 6px 24px rgba(0,0,0,.35)",
+          }}
+        >
           <HexColorPicker color={color} onChange={onChange} />
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8 }}>
             <span style={{ color: "#fff", fontSize: 12 }}>#</span>
-            <HexColorInput color={color} onChange={onChange} prefixed={false} style={{ width: 90, padding: "4px 6px", borderRadius: 6, border: "1px solid #444", background: "#111", color: "#fff", fontFamily: "monospace", fontSize: 12 }} />
+            <HexColorInput
+              color={color}
+              onChange={onChange}
+              prefixed={false}
+              style={{
+                width: 90,
+                padding: "4px 6px",
+                borderRadius: 6,
+                border: "1px solid #444",
+                background: "#111",
+                color: "#fff",
+                fontFamily: "monospace",
+                fontSize: 12,
+              }}
+            />
           </div>
         </div>
       )}
     </div>
   )
 }
+
 /* ---------- ClientPage (Viewer) ---------- */
 export default function ClientPage() {
+  // světla – pevné, ovládání přes manifest/URL, ne přes UI
   const [lightIntensity, setLightIntensity] = useState(1)
   const [lightPos1] = useState({ x: 0, y: 5, z: 5 })
   const [lightPos2] = useState({ x: -10, y: 0, z: 0 })
@@ -346,26 +533,32 @@ export default function ClientPage() {
   const [headlightCfg, setHeadlightCfg] = useState({ enabled: true, intensity: 2.0 })
 
   const [uiReady, setUiReady] = useState(false)
-  useEffect(() => { const id = requestAnimationFrame(() => setUiReady(true)); return () => cancelAnimationFrame(id) }, [])
+  useEffect(() => {
+    const id = requestAnimationFrame(() => setUiReady(true))
+    return () => cancelAnimationFrame(id)
+  }, [])
 
   const [isMobile, setIsMobile] = useState(false)
   useEffect(() => {
     const uaMobile = /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent)
-    const coarse = typeof window !== "undefined" && window.matchMedia && window.matchMedia("(pointer: coarse)").matches
+    const coarse =
+      typeof window !== "undefined" &&
+      window.matchMedia &&
+      window.matchMedia("(pointer: coarse)").matches
     const narrow = typeof window !== "undefined" && window.innerWidth < 768
     setIsMobile(uaMobile || coarse || narrow)
   }, [])
 
-  const [title, setTitle] = useState<string | null>(null)
+  const [title, setTitle] = useState(null)
 
   // modely
-  const [files, setFiles] = useState<any[]>([]) // {url,name,rawName,c,o,v,r,m,vc,km}
-  const [colors, setColors] = useState<string[]>([])
-  const [opacities, setOpacities] = useState<number[]>([])
-  const [visibles, setVisibles] = useState<boolean[]>([])
-  const [roughnesses, setRoughnesses] = useState<number[]>([])
-  const [metalnesses, setMetalnesses] = useState<number[]>([])
-  const [fatal, setFatal] = useState<string | null>(null)
+  const [files, setFiles] = useState([])
+  const [colors, setColors] = useState([])
+  const [opacities, setOpacities] = useState([])
+  const [visibles, setVisibles] = useState([])
+  const [roughnesses, setRoughnesses] = useState([])
+  const [metalnesses, setMetalnesses] = useState([])
+  const [fatal, setFatal] = useState(null)
 
   // auto smooth
   const [autoSmooth, setAutoSmooth] = useState((getParam("smooth") ?? "1") !== "0")
@@ -374,9 +567,9 @@ export default function ClientPage() {
     return isFinite(v) ? Math.max(0, Math.min(80, v)) : 30
   })
 
-  const [logoCfg, setLogoCfg] = useState<any>({ url: DEFAULT_LOGO, opacity: 0.9, width: 160, pos: "bc" })
+  const [logoCfg, setLogoCfg] = useState({ url: DEFAULT_LOGO, opacity: 0.9, width: 160, pos: "bc" })
 
-  const [cameraTarget, setCameraTarget] = useState<[number, number, number]>([0, 0, 0])
+  const [cameraTarget, setCameraTarget] = useState([0, 0, 0])
   const [loadedCount, setLoadedCount] = useState(0)
   const handleModelLoaded = () => setLoadedCount((n) => n + 1)
 
@@ -390,22 +583,26 @@ export default function ClientPage() {
         const manifestUrl = getParam("manifest")
         if (manifestUrl) {
           const m = await fetchJSON(manifestUrl)
-          const Fs = (m?.files || []).map((x: any, i: number) => ({
-            url: x.u, name: stripExt(x.n) || `Model ${i + 1}`, rawName: x.n,
-            c: x.c, o: typeof x.o === "number" ? x.o : 1,
+          const Fs = (m?.files || []).map((x, i) => ({
+            url: x.u,
+            name: stripExt(x.n) || `Model ${i + 1}`,
+            rawName: x.n,
+            c: x.c,
+            o: typeof x.o === "number" ? x.o : 1,
             v: typeof x.v === "boolean" ? x.v : true,
             r: typeof x.r === "number" ? x.r : 0.5,
             m: typeof x.m === "number" ? x.m : 0.5,
-            vc: !!x.vc, km: !!x.km,
+            vc: !!x.vc,
+            km: !!x.km,
           }))
           if (!Fs.length) throw new Error("Manifest je prázdný.")
           setFiles(Fs)
           const palette = ["#f5f5dc", "#8e8e8e", "#ffffff", "#ffd7a8", "#c0c0c0", "#e6f0ff", "#ffeedd"]
-          setColors(Fs.map((f: any, i: number) => f.c || palette[i % palette.length]))
-          setOpacities(Fs.map((f: any) => clamp01(f.o)))
-          setVisibles(Fs.map((f: any) => f.v))
-          setRoughnesses(Fs.map((f: any) => clamp01(f.r)))
-          setMetalnesses(Fs.map((f: any) => clamp01(f.m)))
+          setColors(Fs.map((f, i) => f.c || palette[i % palette.length]))
+          setOpacities(Fs.map((f) => clamp01(f.o)))
+          setVisibles(Fs.map((f) => f.v))
+          setRoughnesses(Fs.map((f) => clamp01(f.r)))
+          setMetalnesses(Fs.map((f) => clamp01(f.m)))
           setTitle(typeof m?.title === "string" ? m.title : (getParam("title") ?? null))
           const logoUrl = m?.logo?.url || DEFAULT_LOGO
           setLogoCfg({
@@ -415,47 +612,71 @@ export default function ClientPage() {
             pos: getParam("logoPos") || "bc",
           })
           const hl = m?.lights?.headlight
-          if (hl && typeof hl === 'object') {
-            setHeadlightCfg({ enabled: typeof hl.enabled === 'boolean' ? hl.enabled : true, intensity: typeof hl.intensity === 'number' ? hl.intensity : 2.0 })
+          if (hl && typeof hl === "object") {
+            setHeadlightCfg({
+              enabled: typeof hl.enabled === "boolean" ? hl.enabled : true,
+              intensity: typeof hl.intensity === "number" ? hl.intensity : 2.0,
+            })
           } else {
-            const qOn = getParam('headlight')
-            const qI = parseFloat(getParam('headlightI') ?? 'NaN')
-            setHeadlightCfg({ enabled: qOn == null ? true : qOn !== '0', intensity: isFinite(qI) ? qI : 2.0 })
+            const qOn = getParam("headlight")
+            const qI = parseFloat(getParam("headlightI") ?? "NaN")
+            setHeadlightCfg({
+              enabled: qOn == null ? true : qOn !== "0",
+              intensity: isFinite(qI) ? qI : 2.0,
+            })
           }
           return
         }
 
         const f = getParam("files")
         if (f) {
-          let arr: any = null
-          try { arr = JSON.parse(f) } catch {}
-          if (!arr) { try { arr = JSON.parse(decodeURIComponent(f)) } catch {} }
+          let arr = null
+          try {
+            arr = JSON.parse(f)
+          } catch {}
+          if (!arr) {
+            try {
+              arr = JSON.parse(decodeURIComponent(f))
+            } catch {}
+          }
           if (!Array.isArray(arr)) throw new Error("Neplatný formát parametru ?files=")
-          const Fs = arr.filter((x) => x && x.u).map((x: any, i: number) => ({
-            url: x.u, name: stripExt(x.n) || `Model ${i + 1}`, rawName: x.n,
-            c: x.c, o: typeof x.o === "number" ? x.o : 1,
-            v: typeof x.v === "boolean" ? x.v : true,
-            r: typeof x.r === "number" ? x.r : 0.5,
-            m: typeof x.m === "number" ? x.m : 0.5,
-            vc: !!x.vc, km: !!x.km,
-          }))
+          const Fs = arr
+            .filter((x) => x && x.u)
+            .map((x, i) => ({
+              url: x.u,
+              name: stripExt(x.n) || `Model ${i + 1}`,
+              rawName: x.n,
+              c: x.c,
+              o: typeof x.o === "number" ? x.o : 1,
+              v: typeof x.v === "boolean" ? x.v : true,
+              r: typeof x.r === "number" ? x.r : 0.5,
+              m: typeof x.m === "number" ? x.m : 0.5,
+              vc: !!x.vc,
+              km: !!x.km,
+            }))
           setFiles(Fs)
           const palette = ["#f5f5dc", "#8e8e8e", "#ffffff", "#ffd7a8", "#c0c0c0", "#e6f0ff", "#ffeedd"]
-          setColors(Fs.map((f: any, i: number) => f.c || palette[i % palette.length]))
-          setOpacities(Fs.map((f: any) => clamp01(f.o)))
-          setVisibles(Fs.map((f: any) => f.v))
-          setRoughnesses(Fs.map((f: any) => clamp01(f.r)))
-          setMetalnesses(Fs.map((f: any) => clamp01(f.m)))
+          setColors(Fs.map((f, i) => f.c || palette[i % palette.length]))
+          setOpacities(Fs.map((f) => clamp01(f.o)))
+          setVisibles(Fs.map((f) => f.v))
+          setRoughnesses(Fs.map((f) => clamp01(f.r)))
+          setMetalnesses(Fs.map((f) => clamp01(f.m)))
           setTitle(getParam("title") ?? null)
           setLogoCfg({
             url: getParam("logo") === "none" ? null : getParam("logo") || DEFAULT_LOGO,
             opacity: clamp01(parseFloat(getParam("logoOpacity") ?? "0.9")),
-            width: parseInt(getParam("logoWidth") ?? (window.innerWidth < 768 ? "120" : "160"), 10),
+            width: parseInt(
+              getParam("logoWidth") ?? (window.innerWidth < 768 ? "120" : "160"),
+              10
+            ),
             pos: getParam("logoPos") || "bc",
           })
-          const qOn = getParam('headlight')
-          const qI = parseFloat(getParam('headlightI') ?? 'NaN')
-          setHeadlightCfg({ enabled: qOn == null ? true : qOn !== '0', intensity: isFinite(qI) ? qI : 2.0 })
+          const qOn = getParam("headlight")
+          const qI = parseFloat(getParam("headlightI") ?? "NaN")
+          setHeadlightCfg({
+            enabled: qOn == null ? true : qOn !== "0",
+            intensity: isFinite(qI) ? qI : 2.0,
+          })
           return
         }
 
@@ -467,11 +688,11 @@ export default function ClientPage() {
         ]
         setFiles(Fs)
         const palette = ["#f5f5dc", "#8e8e8e", "#ffffff"]
-        setColors(Fs.map((_: any, i: number) => palette[i % palette.length]))
+        setColors(Fs.map((_, i) => palette[i % palette.length]))
         setOpacities(Fs.map(() => 1))
-        setVisibles(Fs.map((f: any) => f.v))
-        setRoughnesses(Fs.map((f: any) => f.r))
-        setMetalnesses(Fs.map((f: any) => f.m))
+        setVisibles(Fs.map((f) => f.v))
+        setRoughnesses(Fs.map((f) => f.r))
+        setMetalnesses(Fs.map((f) => f.m))
       } catch (e) {
         console.error(e)
         setFatal("Tento náhled není dostupný (chyba při načtení dat).")
@@ -480,9 +701,9 @@ export default function ClientPage() {
   }, [])
 
   /* ──────────────── LIVE MODE: posluchač postMessage ──────────────── */
-  const applyLivePayload = (p: any) => {
+  const applyLivePayload = (p) => {
     if (!p || !Array.isArray(p.files) || p.files.length === 0) return
-    const Fs = p.files.map((x: any, i: number) => ({
+    const Fs = p.files.map((x, i) => ({
       url: x.u,
       name: stripExt(x.n || `Model ${i + 1}`),
       rawName: x.n || `Model${i + 1}`,
@@ -491,18 +712,19 @@ export default function ClientPage() {
       v: typeof x.v === "boolean" ? x.v : true,
       r: typeof x.r === "number" ? clamp01(x.r) : 0.5,
       m: typeof x.m === "number" ? clamp01(x.m) : 0.5,
-      vc: !!x.vc, km: !!x.km,
+      vc: !!x.vc,
+      km: !!x.km,
     }))
     setFiles(Fs)
-    const palette = ["#f5f5dc","#8e8e8e","#ffffff","#ffd7a8","#c0c0c0","#e6f0ff","#ffeedd"]
-    setColors(Fs.map((f: any, i: number) => f.c || palette[i % palette.length]))
-    setOpacities(Fs.map((f: any) => f.o))
-    setVisibles(Fs.map((f: any) => f.v))
-    setRoughnesses(Fs.map((f: any) => f.r))
-    setMetalnesses(Fs.map((f: any) => f.m))
+    const palette = ["#f5f5dc", "#8e8e8e", "#ffffff", "#ffd7a8", "#c0c0c0", "#e6f0ff", "#ffeedd"]
+    setColors(Fs.map((f, i) => f.c || palette[i % palette.length]))
+    setOpacities(Fs.map((f) => f.o))
+    setVisibles(Fs.map((f) => f.v))
+    setRoughnesses(Fs.map((f) => f.r))
+    setMetalnesses(Fs.map((f) => f.m))
     if (typeof p.title === "string" || p.title === null) setTitle(p.title ?? null)
     if (p.logo) {
-      setLogoCfg((old: any) => ({
+      setLogoCfg((old) => ({
         url: p.logo?.url ?? old.url,
         opacity: typeof p.logo?.opacity === "number" ? clamp01(p.logo.opacity) : old.opacity,
         width: typeof p.logo?.width === "number" ? p.logo.width : old.width,
@@ -513,8 +735,8 @@ export default function ClientPage() {
       if (typeof p.lights.intensity === "number") setLightIntensity(p.lights.intensity)
       if (p.lights.headlight) {
         setHeadlightCfg((old) => ({
-          enabled: typeof p.lights!.headlight!.enabled === "boolean" ? p.lights!.headlight!.enabled : old.enabled,
-          intensity: typeof p.lights!.headlight!.intensity === "number" ? p.lights!.headlight!.intensity : old.intensity,
+          enabled: typeof p.lights.headlight.enabled === "boolean" ? p.lights.headlight.enabled : old.enabled,
+          intensity: typeof p.lights.headlight.intensity === "number" ? p.lights.headlight.intensity : old.intensity,
         }))
       }
     }
@@ -522,9 +744,10 @@ export default function ClientPage() {
   }
 
   useEffect(() => {
-    const onMsg = (e: MessageEvent) => {
-      // volitelně: omezit na origin(y) -> if (!e.origin.endsWith("arthetic.cz") && !e.origin.includes("vercel.app")) return;
-      const data = e.data as any
+    const onMsg = (e) => {
+      // volitelně: omezit na origin(y)
+      // if (!e.origin.endsWith("arthetic.cz") && !e.origin.includes("vercel.app")) return;
+      const data = e.data
       if (data && data.type === LIVE_MSG_TYPE && data.payload) {
         applyLivePayload(data.payload)
       }
@@ -540,7 +763,10 @@ export default function ClientPage() {
       alt=""
       style={{
         position: "absolute",
-        bottom: logoCfg.pos === "bc" || logoCfg.pos === "bl" || logoCfg.pos === "br" ? 12 : "auto",
+        bottom:
+          logoCfg.pos === "bc" || logoCfg.pos === "bl" || logoCfg.pos === "br"
+            ? 12
+            : "auto",
         left: logoCfg.pos === "bl" ? 12 : logoCfg.pos === "bc" ? "50%" : "auto",
         right: logoCfg.pos === "br" ? 12 : "auto",
         transform: logoCfg.pos === "bc" ? "translateX(-50%)" : "none",
@@ -554,26 +780,39 @@ export default function ClientPage() {
     />
   )
 
-  const rootRef = useRef<any>()
+  const rootRef = useRef()
+  const [cameraTarget, setCameraTarget] = useState([0, 0, 0])
   const fillDim = headlightCfg.enabled ? 0.5 : 1
 
   return (
-    <div className="stage" style={{ position: "relative", width: "100vw", height: "100vh", background: "black" }}>
+    <div
+      className="stage"
+      style={{ position: "relative", width: "100vw", height: "100vh", background: "black" }}
+    >
       <PreloadIcons />
       {logoEl}
 
-      {/* Ovládací panel (původní UI) */}
+      {/* Ovládací panel */}
       <div
         className="controls-panel"
         style={{
           position: "absolute",
-          top: 10, left: 10, zIndex: 2,
-          color: "white", fontFamily: "sans-serif", fontSize: "14px",
-          opacity: uiReady ? 1 : 0, transition: "opacity .12s ease",
-          backdropFilter: "blur(3px)", background: "rgba(0,0,0,.25)",
-          border: "1px solid rgba(255,255,255,.15)", borderRadius: 8,
-          padding: "8px 10px", width: "clamp(240px, 30vw, 420px)",
-          maxWidth: "calc(100vw - 20px)", boxSizing: "border-box",
+          top: 10,
+          left: 10,
+          zIndex: 2,
+          color: "white",
+          fontFamily: "sans-serif",
+          fontSize: "14px",
+          opacity: uiReady ? 1 : 0,
+          transition: "opacity .12s ease",
+          backdropFilter: "blur(3px)",
+          background: "rgba(0,0,0,.25)",
+          border: "1px solid rgba(255,255,255,.15)",
+          borderRadius: 8,
+          padding: "8px 10px",
+          width: "clamp(240px, 30vw, 420px)",
+          maxWidth: "calc(100vw - 20px)",
+          boxSizing: "border-box",
         }}
       >
         {fatal ? (
@@ -581,24 +820,58 @@ export default function ClientPage() {
         ) : (
           <>
             {title && (
-              <div title={title} style={{ marginBottom: 8, maxWidth: 280, padding: "6px 10px", borderRadius: 8, border: "1px solid rgba(255,255,255,.18)", background: "rgba(255,255,255,.08)", fontSize: 13, fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+              <div
+                title={title}
+                style={{
+                  marginBottom: 8,
+                  maxWidth: 280,
+                  padding: "6px 10px",
+                  borderRadius: 8,
+                  border: "1px solid rgba(255,255,255,.18)",
+                  background: "rgba(255,255,255,.08)",
+                  fontSize: 13,
+                  fontWeight: 600,
+                  whiteSpace: "nowrap",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                }}
+              >
                 {title}
               </div>
             )}
 
             {files.map((f, i) => (
-              <div key={i} className="control-row" style={{
-                display: "grid", gridTemplateColumns: "36px 1fr 26px",
-                alignItems: "center", columnGap: 6, rowGap: 6, margin: "6px 0",
-              }}>
-                <div className="row-label" style={{ gridColumn: "1 / -1", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={f.rawName || f.name}>
+              <div
+                key={i}
+                className="control-row"
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "36px 1fr 26px",
+                  alignItems: "center",
+                  columnGap: 6,
+                  rowGap: 6,
+                  margin: "6px 0",
+                }}
+              >
+                <div
+                  className="row-label"
+                  style={{
+                    gridColumn: "1 / -1",
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap",
+                  }}
+                  title={f.rawName || f.name}
+                >
                   {stripExt(f.name)}:
                 </div>
 
                 <div className="row-swatch">
                   <ColorSwatch
                     color={colors[i] ?? "#ffffff"}
-                    onChange={(c: string) => setColors((prev) => prev.map((v, idx) => (idx === i ? c : v)))}
+                    onChange={(c) =>
+                      setColors((prev) => prev.map((v, idx) => (idx === i ? c : v)))
+                    }
                     ariaLabel={`${f.name} color`}
                   />
                 </div>
@@ -607,11 +880,15 @@ export default function ClientPage() {
                   <input
                     className="slider"
                     type="range"
-                    min={0} max={1} step={0.01}
+                    min={0}
+                    max={1}
+                    step={0.01}
                     value={opacities[i] ?? 1}
                     onChange={(e) => {
                       const v = parseFloat(e.target.value)
-                      setOpacities((prev) => prev.map((x, idx) => (idx === i ? v : x)))
+                      setOpacities((prev) =>
+                        prev.map((x, idx) => (idx === i ? v : x))
+                      )
                     }}
                     style={{ width: "calc(100% - 18px)", minWidth: 140 }}
                     aria-label={`${f.name} opacity`}
@@ -620,29 +897,93 @@ export default function ClientPage() {
 
                 <button
                   className={`toggle icon-btn ${visibles[i] ? "is-on" : "is-off"}`}
-                  onClick={() => setVisibles((prev) => prev.map((v, idx) => (idx === i ? !v : v)))}
+                  onClick={() =>
+                    setVisibles((prev) => prev.map((v, idx) => (idx === i ? !v : v)))
+                  }
                   aria-label={visibles[i] ? `Hide ${f.name}` : `Show ${f.name}`}
                   style={{
-                    position: "relative", width: 26, height: 22, padding: 0,
-                    display: "inline-flex", alignItems: "center", justifyContent: "center",
-                    overflow: "hidden", background: "transparent",
-                    border: "1px solid white", borderRadius: 6, color: "white", cursor: "pointer",
+                    position: "relative",
+                    width: 26,
+                    height: 22,
+                    padding: 0,
+                    display: "inline-flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    overflow: "hidden",
+                    background: "transparent",
+                    border: "1px solid white",
+                    borderRadius: 6,
+                    color: "white",
+                    cursor: "pointer",
                   }}
                 >
-                  <img src={ICONS.eye} alt="" width="18" height="18" style={{ position: "absolute", inset: 0, width: 18, height: 18, margin: "auto", opacity: visibles[i] ? 1 : 0, transition: "opacity .06s linear" }}/>
-                  <img src={ICONS.eyeOff} alt="" width="18" height="18" style={{ position: "absolute", inset: 0, width: 18, height: 18, margin: "auto", opacity: visibles[i] ? 0 : 1, transition: "opacity .06s linear" }}/>
+                  <img
+                    src={ICONS.eye}
+                    alt=""
+                    width="18"
+                    height="18"
+                    style={{
+                      position: "absolute",
+                      inset: 0,
+                      width: 18,
+                      height: 18,
+                      margin: "auto",
+                      opacity: visibles[i] ? 1 : 0,
+                      transition: "opacity .06s linear",
+                    }}
+                  />
+                  <img
+                    src={ICONS.eyeOff}
+                    alt=""
+                    width="18"
+                    height="18"
+                    style={{
+                      position: "absolute",
+                      inset: 0,
+                      width: 18,
+                      height: 18,
+                      margin: "auto",
+                      opacity: visibles[i] ? 0 : 1,
+                      transition: "opacity .06s linear",
+                    }}
+                  />
                 </button>
               </div>
             ))}
 
             {/* AutoSmooth */}
-            <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8, justifyContent: "flex-end" }}>
-              <label style={{ display: "inline-flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
-                <input type="checkbox" checked={autoSmooth} onChange={(e) => setAutoSmooth(e.target.checked)} />
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                marginTop: 8,
+                justifyContent: "flex-end",
+              }}
+            >
+              <label
+                style={{ display: "inline-flex", alignItems: "center", gap: 6, cursor: "pointer" }}
+              >
+                <input
+                  type="checkbox"
+                  checked={autoSmooth}
+                  onChange={(e) => setAutoSmooth(e.target.checked)}
+                />
                 <span>Auto smooth</span>
               </label>
-              <span style={{ opacity: 0.8, fontSize: 12 }}>Úhel: {Math.round(smoothAngle)}°</span>
-              <input className="slider" type="range" min={0} max={80} step={1} value={smoothAngle} onChange={(e) => setSmoothAngle(parseFloat(e.target.value))} style={{ width: 120 }} />
+              <span style={{ opacity: 0.8, fontSize: 12 }}>
+                Úhel: {Math.round(smoothAngle)}°
+              </span>
+              <input
+                className="slider"
+                type="range"
+                min={0}
+                max={80}
+                step={1}
+                value={smoothAngle}
+                onChange={(e) => setSmoothAngle(parseFloat(e.target.value))}
+                style={{ width: 120 }}
+              />
             </div>
           </>
         )}
@@ -658,11 +999,12 @@ export default function ClientPage() {
       >
         {!fatal && (
           <>
-            <ambientLight intensity={lightIntensity * 0.4 * fillDim} />
-            <directionalLight position={[lightPos1.x, lightPos1.y, lightPos1.z]} intensity={lightIntensity * 1.5 * fillDim} />
-            <directionalLight position={[lightPos2.x, lightPos2.y, lightPos2.z]} intensity={lightIntensity * 1.0 * fillDim} />
-            <directionalLight position={[lightPos3.x, lightPos3.y, lightPos3.z]} intensity={lightIntensity * 1.2 * fillDim} />
-            <directionalLight position={[lightPos4.x, lightPos4.y, lightPos4.z]} intensity={lightIntensity * 0.8 * fillDim} />
+            <ambientLight intensity={lightIntensity * 0.4 * (headlightCfg.enabled ? 0.5 : 1)} />
+            <directionalLight position={[0, 5, 5]} intensity={lightIntensity * 1.5 * (headlightCfg.enabled ? 0.5 : 1)} />
+            <directionalLight position={[-10, 0, 0]} intensity={lightIntensity * 1.0 * (headlightCfg.enabled ? 0.5 : 1)} />
+            <directionalLight position={[10, 0, 0]} intensity={lightIntensity * 1.2 * (headlightCfg.enabled ? 0.5 : 1)} />
+            <directionalLight position={[0, -5, -5]} intensity={lightIntensity * 0.8 * (headlightCfg.enabled ? 0.5 : 1)} />
+
             <Headlight enabled={headlightCfg.enabled} intensity={headlightCfg.intensity} />
 
             <group ref={rootRef}>
@@ -671,11 +1013,11 @@ export default function ClientPage() {
                   <AnyModel
                     key={i}
                     name={f.rawName || f.name}
-                    url={f.url || f.u}  // live i manifest
+                    url={f.url || f.u}
                     color={colors[i] ?? "#ffffff"}
                     opacity={opacities[i] ?? 1}
                     visible={visibles[i] ?? true}
-                    onLoaded={handleModelLoaded}
+                    onLoaded={() => setLoadedCount((n) => n + 1)}
                     autoSmooth={autoSmooth}
                     smoothAngle={smoothAngle}
                     roughness={roughnesses[i] ?? (typeof f.r === "number" ? f.r : 0.5)}
