@@ -11,7 +11,7 @@ import { STLLoader } from "three/examples/jsm/loaders/STLLoader"
 import { PLYLoader } from "three/examples/jsm/loaders/PLYLoader"
 
 /* ---------- Konstanty ---------- */
-const LIVE_MSG_TYPE = "SHADE3D_LIVE"
+const LIVE_MSG_TYPES = new Set(["SHADE3D_LIVE", "SHADE3D_LIVE_V6", "SHADE3D_LIVE_V5"])
 
 /* ---------- Ikony + preload ---------- */
 const ICONS = {
@@ -594,39 +594,45 @@ export default function ClientPage() {
   }, [])
   /* ──────────────── LIVE MODE: posluchač postMessage ──────────────── */
   const applyLivePayload = (p) => {
-    if (!p || !Array.isArray(p.files)) return
+    if (!p) return
 
-    // 1) Pokud se změnily samotné soubory (URL/počet), dovolíme jedno nové zarámování
-    const newFiles = p.files.map((x, i) => ({
-      url: x.u,
-      name: stripExt(x.n || `Model ${i + 1}`),
-      rawName: x.n || `Model${i + 1}`,
-      c: x.c,
-      o: typeof x.o === "number" ? clamp01(x.o) : 1,
-      v: typeof x.v === "boolean" ? x.v : true,
-      r: typeof x.r === "number" ? clamp01(x.r) : 0.5,
-      m: typeof x.m === "number" ? clamp01(x.m) : 0.5,
-      vc: !!x.vc,
-      km: !!x.km,
-    }))
+    // 1) Files jsou VOLITELNÉ – zpracuj jen když dorazí
+    let filesActuallyChanged = false
+    if (Array.isArray(p.files)) {
+      const newFiles = p.files.map((x, i) => ({
+        url: x.u,
+        name: stripExt(x.n || `Model ${i + 1}`),
+        rawName: x.n || `Model${i + 1}`,
+        c: x.c,
+        o: typeof x.o === "number" ? clamp01(x.o) : 1,
+        v: typeof x.v === "boolean" ? x.v : true,
+        r: typeof x.r === "number" ? clamp01(x.r) : 0.5,
+        m: typeof x.m === "number" ? clamp01(x.m) : 0.5,
+        vc: !!x.vc,
+        km: !!x.km,
+      }))
 
-    const newKeys = newFiles.map(f => `${f.url}::${f.rawName || f.name}`)
-    const prevKeys = prevFileKeysRef.current
-    const filesActuallyChanged =
-      newKeys.length !== prevKeys.length ||
-      newKeys.some((k, i) => k !== prevKeys[i])
+      const newKeys = newFiles.map(f => `${f.url}::${f.rawName || f.name}`)
+      const prevKeys = prevFileKeysRef.current
+      filesActuallyChanged =
+        newKeys.length !== prevKeys.length ||
+        newKeys.some((k, i) => k !== prevKeys[i])
 
-    setFiles(newFiles)
-    prevFileKeysRef.current = newKeys
+      setFiles(newFiles)
+      prevFileKeysRef.current = newKeys
 
-    const palette = ["#f5f5dc", "#8e8e8e", "#ffffff", "#ffd7a8", "#c0c0c0", "#e6f0ff", "#ffeedd"]
-    setColors(newFiles.map((f, i) => f.c || palette[i % palette.length]))
-    setOpacities(newFiles.map((f) => f.o))
-    setVisibles(newFiles.map((f) => f.v))
-    setRoughnesses(newFiles.map((f) => f.r))
-    setMetalnesses(newFiles.map((f) => f.m))
+      const palette = ["#f5f5dc", "#8e8e8e", "#ffffff", "#ffd7a8", "#c0c0c0", "#e6f0ff", "#ffeedd"]
+      setColors(newFiles.map((f, i) => f.c || palette[i % palette.length]))
+      setOpacities(newFiles.map((f) => f.o))
+      setVisibles(newFiles.map((f) => f.v))
+      setRoughnesses(newFiles.map((f) => f.r))
+      setMetalnesses(newFiles.map((f) => f.m))
+    }
 
-    if (typeof p.title === "string" || p.title === null) setTitle(p.title ?? null)
+    // 2) Title / Logo – fungují i bez files
+    if (typeof p.title === "string" || p.title === null) {
+      setTitle(p.title ?? null)
+    }
     if (p.logo) {
       setLogoCfg((old) => ({
         url: p.logo?.url ?? old.url,
@@ -635,6 +641,8 @@ export default function ClientPage() {
         pos: p.logo?.pos || old.pos,
       }))
     }
+
+    // 3) Lights – fungují i bez files
     if (p.lights) {
       if (typeof p.lights.intensity === "number") setLightIntensity(p.lights.intensity)
       if (p.lights.headlight) {
@@ -645,7 +653,7 @@ export default function ClientPage() {
       }
     }
 
-    // 2) Reframe pouze když se změnily soubory (ne když měníme barvu/opacity…)
+    // 4) Dorámování jen při změně modelů
     shouldFrameRef.current = filesActuallyChanged
     if (filesActuallyChanged) setLoadedCount(0)
   }
@@ -653,7 +661,7 @@ export default function ClientPage() {
   useEffect(() => {
     const onMsg = (e) => {
       const data = e.data
-      if (data && data.type === LIVE_MSG_TYPE && data.payload) {
+      if (data && LIVE_MSG_TYPES.has(data.type) && data.payload) {
         applyLivePayload(data.payload)
       }
     }
@@ -836,12 +844,12 @@ export default function ClientPage() {
       >
         {!fatal && (
           <>
-            <ambientLight intensity={lightIntensity * 0.4 * fillDim} />
+            <ambientLight intensity={lightIntensity * 0.4 * (headlightCfg.enabled ? 0.5 : 1)} />
             {/* Jednoduché fill/key směrovky */}
-            <directionalLight position={[0, 5, 5]} intensity={lightIntensity * 1.5 * fillDim} />
-            <directionalLight position={[-10, 0, 0]} intensity={lightIntensity * 1.0 * fillDim} />
-            <directionalLight position={[10, 0, 0]} intensity={lightIntensity * 1.2 * fillDim} />
-            <directionalLight position={[0, -5, -5]} intensity={lightIntensity * 0.8 * fillDim} />
+            <directionalLight position={[0, 5, 5]} intensity={lightIntensity * 1.5 * (headlightCfg.enabled ? 0.5 : 1)} />
+            <directionalLight position={[-10, 0, 0]} intensity={lightIntensity * 1.0 * (headlightCfg.enabled ? 0.5 : 1)} />
+            <directionalLight position={[10, 0, 0]} intensity={lightIntensity * 1.2 * (headlightCfg.enabled ? 0.5 : 1)} />
+            <directionalLight position={[0, -5, -5]} intensity={lightIntensity * 0.8 * (headlightCfg.enabled ? 0.5 : 1)} />
 
             {/* Headlight (u kamery) */}
             <Headlight enabled={headlightCfg.enabled} intensity={headlightCfg.intensity} />
@@ -872,7 +880,7 @@ export default function ClientPage() {
             {/* Dorámování pouze pokud shouldFrameRef.current === true */}
             <AutoCenterAndFrame
               rootRef={rootRef}
-              depsKey={frameDepsKey}
+              depsKey={shouldFrameRef.current ? `frame-${files.length}-${loadedCount}` : `noframe-${files.length}-${loadedCount}`}
               setTarget={setCameraTarget}
               margin={1.2}
               isMobile={isMobile}
