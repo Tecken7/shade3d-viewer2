@@ -46,7 +46,7 @@ function inferExt(nameOrUrl) {
   return m ? m[1].toLowerCase() : ""
 }
 
-/* ---------- Live bridge ---------- */
+/* ---------- Live message types ---------- */
 const LIVE_MSG_TYPES = new Set(["SHADE3D_LIVE", "SHADE3D_LIVE_V6", "SHADE3D_LIVE_V5"])
 
 /* ---------- Auto Smooth ---------- */
@@ -413,7 +413,7 @@ function ColorSwatch({ color, onChange, ariaLabel }) {
 
 /* ---------- ClientPage (Viewer) ---------- */
 export default function ClientPage() {
-  // světla – pevné, ovládání přes manifest/URL/live
+  // světla – ovládání přes manifest/URL/live
   const [lightIntensity, setLightIntensity] = useState(1)
   const [headlightCfg, setHeadlightCfg] = useState({ enabled: true, intensity: 2.0 })
 
@@ -455,14 +455,13 @@ export default function ClientPage() {
   const centerParam = (getParam("center") || "combined").toLowerCase()
   const centerMode = ["per", "combined", "none"].includes(centerParam) ? centerParam : "combined"
 
-  // Pomůcka – jestli jsme v live režimu
+  // indikace live módu
   const liveModeRef = useRef(false)
 
-  /* ──────────────── INIT: manifest / files param ──────────────── */
+  /* ──────────────── INIT: manifest / files param (v live nic nenačítej) ──────────────── */
   useEffect(() => {
     ;(async () => {
       try {
-        // LIVE guard – když je ?mode=live nebo hash obsahuje v6, nic nenačítej (čekáme na postMessage)
         const isLiveByQuery = (getParam("mode") || "").toLowerCase() === "live"
         const isLiveByHash = typeof window !== "undefined" && window.location.hash.includes("v6")
         if (isLiveByQuery || isLiveByHash || liveModeRef.current) return
@@ -581,7 +580,7 @@ export default function ClientPage() {
     const onlyLights = !!p.onlyLights
     const onlyParams = !!p.onlyParams
 
-    // Lights
+    // 1) Lights – bez recenteru
     if (onlyLights || p.lights) {
       if (typeof p.lights?.intensity === "number") setLightIntensity(p.lights.intensity)
       if (p.lights?.headlight) {
@@ -593,7 +592,7 @@ export default function ClientPage() {
     }
     if (onlyLights) return
 
-    // Title + logo
+    // 2) Title + Logo – bez recenteru
     if (typeof p.title === "string" || p.title === null) setTitle(p.title ?? null)
     if (p.logo !== undefined) {
       setLogoCfg((old) => ({
@@ -604,9 +603,9 @@ export default function ClientPage() {
       }))
     }
 
-    // Files (parametry + modely)
+    // 3) Files / parametry
     if (Array.isArray(p.files)) {
-      const Fs = p.files.map((x, i) => ({
+      const nextFs = p.files.map((x, i) => ({
         url: x.u,
         name: stripExt(x.n || `Model ${i + 1}`),
         rawName: x.n || `Model${i + 1}`,
@@ -618,14 +617,31 @@ export default function ClientPage() {
         vc: !!x.vc,
         km: !!x.km,
       }))
-      setFiles(Fs)
-      const palette = ["#f5f5dc", "#8e8e8e", "#ffffff", "#ffd7a8", "#c0c0c0", "#e6f0ff", "#ffeedd"]
-      setColors(Fs.map((f, i) => f.c || palette[i % palette.length]))
-      setOpacities(Fs.map((f) => f.o))
-      setVisibles(Fs.map((f) => f.v))
-      setRoughnesses(Fs.map((f) => f.r))
-      setMetalnesses(Fs.map((f) => f.m))
-      setLoadedCount(0) // re-center po načtení
+
+      // porovnáme jen URL — změna URL = nový model => povol re-center
+      const currUrls = files.map(f => f.url)
+      const nextUrls = nextFs.map(f => f.url)
+      const urlsChanged =
+        currUrls.length !== nextUrls.length ||
+        currUrls.some((u, i) => u !== nextUrls[i])
+
+      if (urlsChanged) {
+        setFiles(nextFs)
+        const palette = ["#f5f5dc", "#8e8e8e", "#ffffff", "#ffd7a8", "#c0c0c0", "#e6f0ff", "#ffeedd"]
+        setColors(nextFs.map((f, i) => f.c || palette[i % palette.length]))
+        setOpacities(nextFs.map((f) => f.o))
+        setVisibles(nextFs.map((f) => f.v))
+        setRoughnesses(nextFs.map((f) => f.r))
+        setMetalnesses(nextFs.map((f) => f.m))
+        setLoadedCount(0) // jen když se opravdu mění model
+      } else {
+        // URL beze změny => jen parametry (bez re-center)
+        setColors((prev) => prev.map((_, i) => nextFs[i]?.c ?? prev[i] ?? "#ffffff"))
+        setOpacities((prev) => prev.map((_, i) => nextFs[i]?.o ?? prev[i] ?? 1))
+        setVisibles((prev) => prev.map((_, i) => nextFs[i]?.v ?? prev[i] ?? true))
+        setRoughnesses((prev) => prev.map((_, i) => nextFs[i]?.r ?? prev[i] ?? 0.5))
+        setMetalnesses((prev) => prev.map((_, i) => nextFs[i]?.m ?? prev[i] ?? 0.5))
+      }
     }
   }
 
@@ -671,7 +687,7 @@ export default function ClientPage() {
       <PreloadIcons />
       {logoEl}
 
-      {/* Ovládací panel – minimal UI (zůstává) */}
+      {/* Ovládací panel – minimal UI */}
       <div
         className="controls-panel"
         style={{
