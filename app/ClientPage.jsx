@@ -26,9 +26,6 @@ function PreloadIcons() {
   return null
 }
 
-/* ---------- Live messaging ---------- */
-const LIVE_MSG_TYPE = "SHADE3D_LIVE_V2"
-
 /* ---------- Helpers ---------- */
 const DEFAULT_LOGO = "/Arthetic_logo.png"
 const stripExt = (s) => s?.replace(/\.[^.]+$/, "") || ""
@@ -49,10 +46,15 @@ function inferExt(nameOrUrl) {
   return m ? m[1].toLowerCase() : ""
 }
 
+// Live messaging
+export const LIVE_MSG_TYPE = "SHADE3D_LIVE_V2"
+const isLiveMode = (getParam("mode") || "").toLowerCase() === "live"
+
 /* ---------- Auto Smooth ---------- */
 function autoSmoothGeometry(geometry, angleDeg = 30) {
   const angle = Math.max(0, Math.min(89.9, angleDeg))
   const angleRad = (angle * Math.PI) / 180
+
   const g = geometry.index ? geometry.toNonIndexed() : geometry.clone()
   const pos = g.getAttribute("position")
   const vCount = pos.count
@@ -73,11 +75,15 @@ function autoSmoothGeometry(geometry, angleDeg = 30) {
   }
 
   const groups = new Map()
-  const keyOf = (ix) => `${pos.getX(ix).toFixed(5)},${pos.getY(ix).toFixed(5)},${pos.getZ(ix).toFixed(5)}`
+  const keyOf = (ix) =>
+    `${pos.getX(ix).toFixed(5)},${pos.getY(ix).toFixed(5)},${pos.getZ(ix).toFixed(5)}`
   for (let i = 0; i < vCount; i++) {
     const k = keyOf(i)
     let arr = groups.get(k)
-    if (!arr) { arr = []; groups.set(k, arr) }
+    if (!arr) {
+      arr = []
+      groups.set(k, arr)
+    }
     arr.push(i)
   }
 
@@ -90,16 +96,24 @@ function autoSmoothGeometry(geometry, angleDeg = 30) {
     for (let idx = 0; idx < cornerIndices.length; idx++) {
       const ci = cornerIndices[idx]
       const nRef = localFaceNs[idx]
-      let nx = 0, ny = 0, nz = 0
+      let nx = 0,
+        ny = 0,
+        nz = 0
       for (let j = 0; j < localFaceNs.length; j++) {
         const nj = localFaceNs[j]
-        if (nRef.dot(nj) >= cosThresh) { nx += nj.x; ny += nj.y; nz += nj.z }
+        if (nRef.dot(nj) >= cosThresh) {
+          nx += nj.x
+          ny += nj.y
+          nz += nj.z
+        }
       }
       tmp.set(nx, ny, nz)
       if (tmp.lengthSq() === 0) tmp.copy(nRef)
       tmp.normalize()
       const w = ci * 3
-      normals[w] = tmp.x; normals[w + 1] = tmp.y; normals[w + 2] = tmp.z
+      normals[w] = tmp.x
+      normals[w + 1] = tmp.y
+      normals[w + 2] = tmp.z
     }
   })
 
@@ -113,7 +127,16 @@ function autoSmoothGeometry(geometry, angleDeg = 30) {
 function InlineLoader({ text }) {
   return (
     <Html center>
-      <div style={{ background: "rgba(0,0,0,0.7)", padding: "16px 28px", borderRadius: 10, color: "white", fontFamily: "sans-serif", fontSize: 16 }}>
+      <div
+        style={{
+          background: "rgba(0,0,0,0.7)",
+          padding: "16px 28px",
+          borderRadius: 10,
+          color: "white",
+          fontFamily: "sans-serif",
+          fontSize: 16,
+        }}
+      >
         ⏳ {text || "Načítám…"}
       </div>
     </Html>
@@ -122,10 +145,16 @@ function InlineLoader({ text }) {
 
 /* ---------- AnyModel ---------- */
 function AnyModel({
-  name, url,
-  color, opacity, visible,
-  onLoaded, autoSmooth, smoothAngle,
-  roughness = 0.5, metalness = 0.5,
+  name,
+  url,
+  color,
+  opacity,
+  visible,
+  onLoaded,
+  autoSmooth,
+  smoothAngle,
+  roughness = 0.5,
+  metalness = 0.5,
   useVertexColors = false,
   keepMaterials = false,
 }) {
@@ -166,9 +195,10 @@ function AnyModel({
           if (autoSmooth) base = autoSmoothGeometry(geom, smoothAngle)
           else if (!geom.attributes.normal) geom.computeVertexNormals()
 
-          const mat = hasVC && useVertexColors
-            ? makeMat({ vertexColors: true, color: new THREE.Color("#ffffff") })
-            : makeMat()
+          const mat =
+            hasVC && useVertexColors
+              ? makeMat({ vertexColors: true, color: new THREE.Color("#ffffff") })
+              : makeMat()
 
           obj = new THREE.Mesh(base, mat)
           obj.userData._baseGeom = geom
@@ -190,7 +220,9 @@ function AnyModel({
             obj = loaded
           } else {
             const mat = makeMat()
-            loaded.traverse((child) => { if (child.isMesh) child.material = mat })
+            loaded.traverse((child) => {
+              if (child.isMesh) child.material = mat
+            })
             obj = loaded
           }
         }
@@ -205,7 +237,9 @@ function AnyModel({
         console.error("Model load error:", e)
       }
     })()
-    return () => { cancelled = true }
+    return () => {
+      cancelled = true
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [url, ext])
 
@@ -253,9 +287,10 @@ function AnyModel({
         }
       } else {
         const hasVC = !!child.geometry.getAttribute?.("color")
-        const mat = hasVC && useVertexColors
-          ? makeMat({ vertexColors: true, color: new THREE.Color("#ffffff") })
-          : makeMat()
+        const mat =
+          hasVC && useVertexColors
+            ? makeMat({ vertexColors: true, color: new THREE.Color("#ffffff") })
+            : makeMat()
         child.material = mat
       }
     })
@@ -272,9 +307,7 @@ function Headlight({ enabled = true, intensity = 2, color = "#ffffff" }) {
   useFrame(() => {
     if (ref.current) ref.current.position.copy(camera.position)
   })
-  return (
-    <pointLight ref={ref} color={color} intensity={enabled ? intensity : 0} distance={0} decay={0} />
-  )
+  return <pointLight ref={ref} color={color} intensity={enabled ? intensity : 0} distance={0} decay={0} />
 }
 
 /* ---------- Trackball ---------- */
@@ -289,8 +322,14 @@ function TouchTrackballControls({ target = [0, 0, 0] }) {
     controls.panSpeed = 1.0
     controls.staticMoving = true
     controlsRef.current = controls
-    const ts = (e) => { e.preventDefault(); controls.handleTouchStart(e) }
-    const tm = (e) => { e.preventDefault(); controls.handleTouchMove(e) }
+    const ts = (e) => {
+      e.preventDefault()
+      controls.handleTouchStart(e)
+    }
+    const tm = (e) => {
+      e.preventDefault()
+      controls.handleTouchMove(e)
+    }
     gl.domElement.addEventListener("touchstart", ts, { passive: false })
     gl.domElement.addEventListener("touchmove", tm, { passive: false })
     return () => {
@@ -317,8 +356,13 @@ function TouchTrackballControls({ target = [0, 0, 0] }) {
 
 /* ---------- AutoCenter & AutoFrame ---------- */
 function AutoCenterAndFrame({
-  rootRef, depsKey, setTarget,
-  margin = 1.2, isMobile = false, desktopScale = 0.4, mobileScale = 1.0,
+  rootRef,
+  depsKey,
+  setTarget,
+  margin = 1.2,
+  isMobile = false,
+  desktopScale = 0.4,
+  mobileScale = 1.0,
   centerMode = "combined",
 }) {
   const { camera, size } = useThree()
@@ -371,7 +415,7 @@ function AutoCenterAndFrame({
     camera.zoom = Math.max(newZoom, 0.01)
     camera.position.set(ctr.x, ctr.y, ctr.z + Math.abs(camera.position.z))
     camera.updateProjectionMatrix()
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [depsKey, size.width, size.height, isMobile, desktopScale, mobileScale, margin, centerMode])
 
   return null
@@ -382,7 +426,9 @@ function ColorSwatch({ color, onChange, ariaLabel }) {
   const [open, setOpen] = useState(false)
   const containerRef = useRef(null)
   useEffect(() => {
-    const onDocClick = (e) => { if (open && containerRef.current && !containerRef.current.contains(e.target)) setOpen(false) }
+    const onDocClick = (e) => {
+      if (open && containerRef.current && !containerRef.current.contains(e.target)) setOpen(false)
+    }
     document.addEventListener("mousedown", onDocClick)
     return () => document.removeEventListener("mousedown", onDocClick)
   }, [open])
@@ -392,14 +438,50 @@ function ColorSwatch({ color, onChange, ariaLabel }) {
         aria-label={ariaLabel || "color picker"}
         onClick={() => setOpen((v) => !v)}
         className="swatch-btn"
-        style={{ width: 36, height: 22, borderRadius: 4, border: "1px solid #fff", background: color, cursor: "pointer", boxShadow: "0 0 0 1px rgba(0,0,0,.25) inset" }}
+        style={{
+          width: 36,
+          height: 22,
+          borderRadius: 4,
+          border: "1px solid #fff",
+          background: color,
+          cursor: "pointer",
+          boxShadow: "0 0 0 1px rgba(0,0,0,.25) inset",
+        }}
       />
       {open && (
-        <div className="swatch-pop" style={{ position: "absolute", zIndex: 20, top: 28, left: 0, background: "rgba(0,0,0,.92)", padding: 12, borderRadius: 10, border: "1px solid rgba(255,255,255,.18)", backdropFilter: "blur(4px)", boxShadow: "0 6px 24px rgba(0,0,0,.35)" }}>
+        <div
+          className="swatch-pop"
+          style={{
+            position: "absolute",
+            zIndex: 20,
+            top: 28,
+            left: 0,
+            background: "rgba(0,0,0,.92)",
+            padding: 12,
+            borderRadius: 10,
+            border: "1px solid rgba(255,255,255,.18)",
+            backdropFilter: "blur(4px)",
+            boxShadow: "0 6px 24px rgba(0,0,0,.35)",
+          }}
+        >
           <HexColorPicker color={color} onChange={onChange} />
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8 }}>
             <span style={{ color: "#fff", fontSize: 12 }}>#</span>
-            <HexColorInput color={color} onChange={onChange} prefixed={false} style={{ width: 90, padding: "4px 6px", borderRadius: 6, border: "1px solid #444", background: "#111", color: "#fff", fontFamily: "monospace", fontSize: 12 }} />
+            <HexColorInput
+              color={color}
+              onChange={onChange}
+              prefixed={false}
+              style={{
+                width: 90,
+                padding: "4px 6px",
+                borderRadius: 6,
+                border: "1px solid #444",
+                background: "#111",
+                color: "#fff",
+                fontFamily: "monospace",
+                fontSize: 12,
+              }}
+            />
           </div>
         </div>
       )}
@@ -411,10 +493,17 @@ function ColorSwatch({ color, onChange, ariaLabel }) {
 export default function ClientPage() {
   // světla – pevné, ovládání přes manifest/URL, ne přes UI
   const [lightIntensity, setLightIntensity] = useState(1)
+  const [lightPos1, setLightPos1] = useState({ x: 0, y: 5, z: 5 })
+  const [lightPos2, setLightPos2] = useState({ x: -10, y: 0, z: 0 })
+  const [lightPos3, setLightPos3] = useState({ x: 10, y: 0, z: 0 })
+  const [lightPos4, setLightPos4] = useState({ x: 0, y: -5, z: -5 })
   const [headlightCfg, setHeadlightCfg] = useState({ enabled: true, intensity: 2.0 })
 
   const [uiReady, setUiReady] = useState(false)
-  useEffect(() => { const id = requestAnimationFrame(() => setUiReady(true)); return () => cancelAnimationFrame(id) }, [])
+  useEffect(() => {
+    const id = requestAnimationFrame(() => setUiReady(true))
+    return () => cancelAnimationFrame(id)
+  }, [])
 
   const [isMobile, setIsMobile] = useState(false)
   useEffect(() => {
@@ -451,7 +540,7 @@ export default function ClientPage() {
   const centerParam = (getParam("center") || "combined").toLowerCase()
   const centerMode = ["per", "combined", "none"].includes(centerParam) ? centerParam : "combined"
 
-  // INIT (manifest / files param)
+  // INIT: manifest / files / (NO dev fallback in live)
   useEffect(() => {
     ;(async () => {
       try {
@@ -474,11 +563,11 @@ export default function ClientPage() {
           setFiles(Fs)
           const palette = ["#f5f5dc", "#8e8e8e", "#ffffff", "#ffd7a8", "#c0c0c0", "#e6f0ff", "#ffeedd"]
           setColors(Fs.map((f, i) => f.c || palette[i % palette.length]))
-          setOpacities(Fs.map((f) => clamp01(f.o)))
-          setVisibles(Fs.map((f) => f.v))
-          setRoughnesses(Fs.map((f) => clamp01(f.r)))
-          setMetalnesses(Fs.map((f) => clamp01(f.m)))
-          setTitle(typeof m?.title === "string" ? m.title : (getParam("title") ?? null))
+          setOpacities(Fs.map((f) => (typeof f.o === "number" ? clamp01(f.o) : 1)))
+          setVisibles(Fs.map((f) => (typeof f.v === "boolean" ? f.v : true)))
+          setRoughnesses(Fs.map((f) => (typeof f.r === "number" ? clamp01(f.r) : 0.5)))
+          setMetalnesses(Fs.map((f) => (typeof f.m === "number" ? clamp01(f.m) : 0.5)))
+          setTitle(typeof m?.title === "string" ? m.title : getParam("title") ?? null)
           const logoUrl = m?.logo?.url || DEFAULT_LOGO
           setLogoCfg({
             url: logoUrl || null,
@@ -506,28 +595,36 @@ export default function ClientPage() {
         const f = getParam("files")
         if (f) {
           let arr = null
-          try { arr = JSON.parse(f) } catch {}
-          if (!arr) { try { arr = JSON.parse(decodeURIComponent(f)) } catch {} }
+          try {
+            arr = JSON.parse(f)
+          } catch {}
+          if (!arr) {
+            try {
+              arr = JSON.parse(decodeURIComponent(f))
+            } catch {}
+          }
           if (!Array.isArray(arr)) throw new Error("Neplatný formát parametru ?files=")
-          const Fs = arr.filter((x) => x && x.u).map((x, i) => ({
-            url: x.u,
-            name: stripExt(x.n) || `Model ${i + 1}`,
-            rawName: x.n,
-            c: x.c,
-            o: typeof x.o === "number" ? x.o : 1,
-            v: typeof x.v === "boolean" ? x.v : true,
-            r: typeof x.r === "number" ? x.r : 0.5,
-            m: typeof x.m === "number" ? x.m : 0.5,
-            vc: !!x.vc,
-            km: !!x.km,
-          }))
+          const Fs = arr
+            .filter((x) => x && x.u)
+            .map((x, i) => ({
+              url: x.u,
+              name: stripExt(x.n) || `Model ${i + 1}`,
+              rawName: x.n,
+              c: x.c,
+              o: typeof x.o === "number" ? x.o : 1,
+              v: typeof x.v === "boolean" ? x.v : true,
+              r: typeof x.r === "number" ? x.r : 0.5,
+              m: typeof x.m === "number" ? x.m : 0.5,
+              vc: !!x.vc,
+              km: !!x.km,
+            }))
           setFiles(Fs)
           const palette = ["#f5f5dc", "#8e8e8e", "#ffffff", "#ffd7a8", "#c0c0c0", "#e6f0ff", "#ffeedd"]
           setColors(Fs.map((f, i) => f.c || palette[i % palette.length]))
-          setOpacities(Fs.map((f) => clamp01(f.o)))
-          setVisibles(Fs.map((f) => f.v))
-          setRoughnesses(Fs.map((f) => clamp01(f.r)))
-          setMetalnesses(Fs.map((f) => clamp01(f.m)))
+          setOpacities(Fs.map((f) => (typeof f.o === "number" ? clamp01(f.o) : 1)))
+          setVisibles(Fs.map((f) => (typeof f.v === "boolean" ? f.v : true)))
+          setRoughnesses(Fs.map((f) => (typeof f.r === "number" ? clamp01(f.r) : 0.5)))
+          setMetalnesses(Fs.map((f) => (typeof f.m === "number" ? clamp01(f.m) : 0.5)))
           setTitle(getParam("title") ?? null)
           setLogoCfg({
             url: getParam("logo") === "none" ? null : getParam("logo") || DEFAULT_LOGO,
@@ -544,7 +641,15 @@ export default function ClientPage() {
           return
         }
 
-        // dev fallback
+        // ⬇️ NOVĚ: v LIVE režimu nenačítej dev modely, čekáme na postMessage
+        if (isLiveMode) {
+          setFiles([])
+          setTitle(getParam("title") ?? null)
+          setLogoCfg((old) => ({ ...old, url: null }))
+          return
+        }
+
+        // DEV FALLBACK (jen mimo live)
         const Fs = [
           { url: "/models/Upper.obj", name: "Upper", rawName: "Upper.obj", r: 0.5, m: 0.5, v: true, vc: false, km: false },
           { url: "/models/Lower.stl", name: "Lower", rawName: "Lower.stl", r: 0.5, m: 0.5, v: true, vc: false, km: false },
@@ -564,161 +669,70 @@ export default function ClientPage() {
     })()
   }, [])
 
-  /* ──────────────── LIVE: helper na převod ArrayBuffer -> objectURL ──────────────── */
-  const binToObjectUrl = (buf, mime) => URL.createObjectURL(new Blob([buf], { type: mime || "application/octet-stream" }))
-
   /* ──────────────── LIVE MODE: posluchač postMessage ──────────────── */
   const applyLivePayload = (p) => {
-    if (!p) return
-
-    // 1) onlyLights – bez recenteru, jen světla/title/logo
-    if (p.onlyLights) {
-      if (typeof p.title === "string" || p.title === null) setTitle(p.title ?? null)
-
-      if (p.logo) {
-        setLogoCfg((old) => {
-          let url = old.url
-          if (p.logo.bin) {
-            try { url = binToObjectUrl(p.logo.bin, p.logo.mime) } catch {}
-          }
-          return {
-            url,
-            opacity: typeof p.logo.opacity === "number" ? clamp01(p.logo.opacity) : old.opacity,
-            width: typeof p.logo.width === "number" ? p.logo.width : old.width,
-            pos: p.logo.pos || old.pos,
-          }
-        })
+    if (!p || !Array.isArray(p.files) || p.files.length === 0) {
+      // vyčištění plochy
+      setFiles([])
+      setColors([])
+      setOpacities([])
+      setVisibles([])
+      setRoughnesses([])
+      setMetalnesses([])
+      setTitle(typeof p?.title === "string" ? p.title : null)
+      if (p?.logo) {
+        setLogoCfg((old) => ({
+          url: p.logo?.url ?? null,
+          opacity: typeof p.logo?.opacity === "number" ? clamp01(p.logo.opacity) : old.opacity,
+          width: typeof p.logo?.width === "number" ? p.logo.width : old.width,
+          pos: p.logo?.pos || old.pos,
+        }))
+      } else {
+        setLogoCfg((old) => ({ ...old, url: null }))
       }
-
-      if (p.lights) {
-        if (typeof p.lights.intensity === "number") setLightIntensity(p.lights.intensity)
-        if (p.lights.headlight) {
-          setHeadlightCfg((old) => ({
-            enabled: typeof p.lights.headlight.enabled === "boolean" ? p.lights.headlight.enabled : old.enabled,
-            intensity: typeof p.lights.headlight.intensity === "number" ? p.lights.headlight.intensity : old.intensity,
-          }))
-        }
-      }
-      return
-    }
-
-    // 2) onlyParams – nepřepisuj files; mapuj podle názvu (rawName || name)
-    if (p.onlyParams && Array.isArray(p.files)) {
-      const nameToIndex = new Map()
-      files.forEach((f, i) => {
-        nameToIndex.set(f.rawName || f.name, i)
-      })
-
-      const nextColors = [...colors]
-      const nextOp = [...opacities]
-      const nextVis = [...visibles]
-      const nextR = [...roughnesses]
-      const nextM = [...metalnesses]
-
-      p.files.forEach((x) => {
-        const key = x.n || x.name
-        if (!key) return
-        const idx = nameToIndex.get(key)
-        if (idx == null) return
-        if (x.c) nextColors[idx] = x.c
-        if (typeof x.o === "number") nextOp[idx] = clamp01(x.o)
-        if (typeof x.v === "boolean") nextVis[idx] = x.v
-        if (typeof x.r === "number") nextR[idx] = clamp01(x.r)
-        if (typeof x.m === "number") nextM[idx] = clamp01(x.m)
-        // vc/km by vyžadovalo přebudovat materiál – necháme na příští full update nebo doplníme dle potřeby
-      })
-
-      setColors(nextColors)
-      setOpacities(nextOp)
-      setVisibles(nextVis)
-      setRoughnesses(nextR)
-      setMetalnesses(nextM)
-
-      // volitelné doplňky (title/logo/lights) – bez recenteru
-      if (typeof p.title === "string" || p.title === null) setTitle(p.title ?? null)
-      if (p.logo) {
-        setLogoCfg((old) => {
-          let url = old.url
-          if (p.logo.bin) { try { url = binToObjectUrl(p.logo.bin, p.logo.mime) } catch {} }
-          return {
-            url,
-            opacity: typeof p.logo.opacity === "number" ? clamp01(p.logo.opacity) : old.opacity,
-            width: typeof p.logo.width === "number" ? p.logo.width : old.width,
-            pos: p.logo.pos || old.pos,
-          }
-        })
-      }
-      if (p.lights) {
-        if (typeof p.lights.intensity === "number") setLightIntensity(p.lights.intensity)
-        if (p.lights.headlight) {
-          setHeadlightCfg((old) => ({
-            enabled: typeof p.lights.headlight.enabled === "boolean" ? p.lights.headlight.enabled : old.enabled,
-            intensity: typeof p.lights.headlight.intensity === "number" ? p.lights.headlight.intensity : old.intensity,
-          }))
-        }
-      }
-      return
-    }
-
-    // 3) full update – může obsahovat b (buffer) nebo u (url)
-    if (Array.isArray(p.files) && p.files.length > 0) {
-      const Fs = p.files.map((x, i) => {
-        let url = x.u
-        if (!url && x.b) {
-          // vytvoř blob URL podle typu
-          const mime =
-            x.ext === "stl" ? "model/stl" :
-            x.ext === "ply" ? "application/octet-stream" :
-            "text/plain"
-          url = binToObjectUrl(x.b, mime)
-        }
-        return {
-          url,
-          name: stripExt(x.n || `Model ${i + 1}`),
-          rawName: x.n || `Model${i + 1}`,
-          c: x.c,
-          o: typeof x.o === "number" ? clamp01(x.o) : 1,
-          v: typeof x.v === "boolean" ? x.v : true,
-          r: typeof x.r === "number" ? clamp01(x.r) : 0.5,
-          m: typeof x.m === "number" ? clamp01(x.m) : 0.5,
-          vc: !!x.vc,
-          km: !!x.km,
-        }
-      })
-
-      setFiles(Fs)
-      const palette = ["#f5f5dc", "#8e8e8e", "#ffffff", "#ffd7a8", "#c0c0c0", "#e6f0ff", "#ffeedd"]
-      setColors(Fs.map((f, i) => f.c || palette[i % palette.length]))
-      setOpacities(Fs.map((f) => f.o))
-      setVisibles(Fs.map((f) => f.v))
-      setRoughnesses(Fs.map((f) => f.r))
-      setMetalnesses(Fs.map((f) => f.m))
-      if (typeof p.title === "string" || p.title === null) setTitle(p.title ?? null)
-
-      if (p.logo) {
-        let url = logoCfg.url
-        if (p.logo.bin) { try { url = binToObjectUrl(p.logo.bin, p.logo.mime) } catch {} }
-        setLogoCfg({
-          url,
-          opacity: typeof p.logo.opacity === "number" ? clamp01(p.logo.opacity) : logoCfg.opacity,
-          width: typeof p.logo.width === "number" ? p.logo.width : logoCfg.width,
-          pos: p.logo.pos || logoCfg.pos,
-        })
-      }
-
-      if (p.lights) {
-        if (typeof p.lights.intensity === "number") setLightIntensity(p.lights.intensity)
-        if (p.lights.headlight) {
-          setHeadlightCfg((old) => ({
-            enabled: typeof p.lights.headlight.enabled === "boolean" ? p.lights.headlight.enabled : old.enabled,
-            intensity: typeof p.lights.headlight.intensity === "number" ? p.lights.headlight.intensity : old.intensity,
-          }))
-        }
-      }
-
-      // jen full update → recenter
       setLoadedCount(0)
+      return
     }
+
+    const Fs = p.files.map((x, i) => ({
+      url: x.u,
+      name: stripExt(x.n || `Model ${i + 1}`),
+      rawName: x.n || `Model${i + 1}`,
+      c: x.c,
+      o: typeof x.o === "number" ? clamp01(x.o) : 1,
+      v: typeof x.v === "boolean" ? x.v : true,
+      r: typeof x.r === "number" ? clamp01(x.r) : 0.5,
+      m: typeof x.m === "number" ? clamp01(x.m) : 0.5,
+      vc: !!x.vc,
+      km: !!x.km,
+    }))
+    setFiles(Fs)
+    const palette = ["#f5f5dc", "#8e8e8e", "#ffffff", "#ffd7a8", "#c0c0c0", "#e6f0ff", "#ffeedd"]
+    setColors(Fs.map((f, i) => f.c || palette[i % palette.length]))
+    setOpacities(Fs.map((f) => f.o))
+    setVisibles(Fs.map((f) => f.v))
+    setRoughnesses(Fs.map((f) => f.r))
+    setMetalnesses(Fs.map((f) => f.m))
+    if (typeof p.title === "string" || p.title === null) setTitle(p.title ?? null)
+    if (p.logo) {
+      setLogoCfg((old) => ({
+        url: p.logo?.url ?? old.url,
+        opacity: typeof p.logo?.opacity === "number" ? clamp01(p.logo.opacity) : old.opacity,
+        width: typeof p.logo?.width === "number" ? p.logo.width : old.width,
+        pos: p.logo?.pos || old.pos,
+      }))
+    }
+    if (p.lights) {
+      if (typeof p.lights.intensity === "number") setLightIntensity(p.lights.intensity)
+      if (p.lights.headlight) {
+        setHeadlightCfg((old) => ({
+          enabled: typeof p.lights.headlight.enabled === "boolean" ? p.lights.headlight.enabled : old.enabled,
+          intensity:
+            typeof p.lights.headlight.intensity === "number" ? p.lights.headlight.intensity : old.intensity,
+        }))
+      }
+    }
+    setLoadedCount(0) // re-center
   }
 
   useEffect(() => {
@@ -730,30 +744,34 @@ export default function ClientPage() {
     }
     window.addEventListener("message", onMsg)
     return () => window.removeEventListener("message", onMsg)
-  }, [files, colors, opacities, visibles, roughnesses, metalnesses, logoCfg])
+  }, [])
 
   // LOGO
-  const logoEl = logoCfg.url && (
-    <img
-      src={logoCfg.url}
-      alt=""
-      style={{
-        position: "absolute",
-        bottom: logoCfg.pos === "bc" || logoCfg.pos === "bl" || logoCfg.pos === "br" ? 12 : "auto",
-        left: logoCfg.pos === "bl" ? 12 : logoCfg.pos === "bc" ? "50%" : "auto",
-        right: logoCfg.pos === "br" ? 12 : "auto",
-        transform: logoCfg.pos === "bc" ? "translateX(-50%)" : "none",
-        width: logoCfg.width,
-        opacity: logoCfg.opacity,
-        zIndex: 0,
-        pointerEvents: "none",
-        userSelect: "none",
-        filter: "drop-shadow(0 0 1px rgba(0,0,0,.25))",
-      }}
-    />
-  )
+  const logoEl =
+    logoCfg.url && (
+      <img
+        src={logoCfg.url}
+        alt=""
+        style={{
+          position: "absolute",
+          bottom: logoCfg.pos === "bc" || logoCfg.pos === "bl" || logoCfg.pos === "br" ? 12 : "auto",
+          left: logoCfg.pos === "bl" ? 12 : logoCfg.pos === "bc" ? "50%" : "auto",
+          right: logoCfg.pos === "br" ? 12 : "auto",
+          transform: logoCfg.pos === "bc" ? "translateX(-50%)" : "none",
+          width: logoCfg.width,
+          opacity: logoCfg.opacity,
+          zIndex: 0,
+          pointerEvents: "none",
+          userSelect: "none",
+          filter: "drop-shadow(0 0 1px rgba(0,0,0,.25))",
+        }}
+      />
+    )
 
+  // ref na root group v Canvasu
   const rootRef = useRef()
+
+  // když je headlight aktivní, lehce stáhneme fill světla, aby byl efekt čitelný
   const fillDim = headlightCfg.enabled ? 0.5 : 1
 
   return (
@@ -761,18 +779,27 @@ export default function ClientPage() {
       <PreloadIcons />
       {logoEl}
 
-      {/* Ovládací panel – (viewer UI) */}
+      {/* Ovládací panel – zjednodušený: jen per-model barva/opacity/visibility + AutoSmooth */}
       <div
         className="controls-panel"
         style={{
           position: "absolute",
-          top: 10, left: 10, zIndex: 2,
-          color: "white", fontFamily: "sans-serif", fontSize: "14px",
-          opacity: uiReady ? 1 : 0, transition: "opacity .12s ease",
-          backdropFilter: "blur(3px)", background: "rgba(0,0,0,.25)",
-          border: "1px solid rgba(255,255,255,.15)", borderRadius: 8,
-          padding: "8px 10px", width: "clamp(240px, 30vw, 420px)",
-          maxWidth: "calc(100vw - 20px)", boxSizing: "border-box",
+          top: 10,
+          left: 10,
+          zIndex: 2,
+          color: "white",
+          fontFamily: "sans-serif",
+          fontSize: "14px",
+          opacity: uiReady ? 1 : 0,
+          transition: "opacity .12s ease",
+          backdropFilter: "blur(3px)",
+          background: "rgba(0, 0, 0, 0.25)",
+          border: "1px solid rgba(255,255,255,.15)",
+          borderRadius: 8,
+          padding: "8px 10px",
+          width: "clamp(240px, 30vw, 420px)",
+          maxWidth: "calc(100vw - 20px)",
+          boxSizing: "border-box",
         }}
       >
         {fatal ? (
@@ -780,19 +807,49 @@ export default function ClientPage() {
         ) : (
           <>
             {title && (
-              <div title={title} style={{ marginBottom: 8, maxWidth: 280, padding: "6px 10px", borderRadius: 8, border: "1px solid rgba(255,255,255,.18)", background: "rgba(255,255,255,.08)", fontSize: 13, fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+              <div
+                title={title}
+                style={{
+                  marginBottom: 8,
+                  maxWidth: 280,
+                  padding: "6px 10px",
+                  borderRadius: 8,
+                  border: "1px solid rgba(255,255,255,.18)",
+                  background: "rgba(255,255,255,.08)",
+                  fontSize: 13,
+                  fontWeight: 600,
+                  whiteSpace: "nowrap",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                }}
+              >
                 {title}
               </div>
             )}
 
             {files.map((f, i) => (
-              <div key={i} className="control-row" style={{
-                display: "grid", gridTemplateColumns: "36px 1fr 26px",
-                alignItems: "center", columnGap: 6, rowGap: 6, margin: "6px 0",
-              }}>
-                <div className="row-label" style={{ gridColumn: "1 / -1", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={f.rawName || f.name}>
+              <div
+                key={i}
+                className="control-row"
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "36px 1fr 26px",
+                  alignItems: "center",
+                  columnGap: 6,
+                  rowGap: 6,
+                  margin: "6px 0",
+                }}
+              >
+                {/* Label */}
+                <div
+                  className="row-label"
+                  style={{ gridColumn: "1 / -1", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+                  title={f.rawName || f.name}
+                >
                   {stripExt(f.name)}:
                 </div>
+
+                {/* Swatch */}
                 <div className="row-swatch">
                   <ColorSwatch
                     color={colors[i] ?? "#ffffff"}
@@ -800,11 +857,15 @@ export default function ClientPage() {
                     ariaLabel={`${f.name} color`}
                   />
                 </div>
+
+                {/* Slider – Opacity */}
                 <div className="row-slider" style={{ minWidth: 0 }}>
                   <input
                     className="slider"
                     type="range"
-                    min={0} max={1} step={0.01}
+                    min={0}
+                    max={1}
+                    step={0.01}
                     value={opacities[i] ?? 1}
                     onChange={(e) => {
                       const v = parseFloat(e.target.value)
@@ -814,31 +875,87 @@ export default function ClientPage() {
                     aria-label={`${f.name} opacity`}
                   />
                 </div>
+
+                {/* Eye */}
                 <button
                   className={`toggle icon-btn ${visibles[i] ? "is-on" : "is-off"}`}
                   onClick={() => setVisibles((prev) => prev.map((v, idx) => (idx === i ? !v : v)))}
                   aria-label={visibles[i] ? `Hide ${f.name}` : `Show ${f.name}`}
                   style={{
-                    position: "relative", width: 26, height: 22, padding: 0,
-                    display: "inline-flex", alignItems: "center", justifyContent: "center",
-                    overflow: "hidden", background: "transparent",
-                    border: "1px solid white", borderRadius: 6, color: "white", cursor: "pointer",
+                    position: "relative",
+                    width: 26,
+                    height: 22,
+                    padding: 0,
+                    display: "inline-flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    overflow: "hidden",
+                    background: "transparent",
+                    border: "1px solid white",
+                    borderRadius: 6,
+                    color: "white",
+                    cursor: "pointer",
                   }}
                 >
-                  <img src={ICONS.eye} alt="" width="18" height="18" style={{ position: "absolute", inset: 0, width: 18, height: 18, margin: "auto", opacity: visibles[i] ? 1 : 0, transition: "opacity .06s linear" }}/>
-                  <img src={ICONS.eyeOff} alt="" width="18" height="18" style={{ position: "absolute", inset: 0, width: 18, height: 18, margin: "auto", opacity: visibles[i] ? 0 : 1, transition: "opacity .06s linear" }}/>
+                  <img
+                    src={ICONS.eye}
+                    alt=""
+                    width="18"
+                    height="18"
+                    style={{
+                      position: "absolute",
+                      inset: 0,
+                      width: 18,
+                      height: 18,
+                      margin: "auto",
+                      opacity: visibles[i] ? 1 : 0,
+                      transition: "opacity .06s linear",
+                    }}
+                  />
+                  <img
+                    src={ICONS.eyeOff}
+                    alt=""
+                    width="18"
+                    height="18"
+                    style={{
+                      position: "absolute",
+                      inset: 0,
+                      width: 18,
+                      height: 18,
+                      margin: "auto",
+                      opacity: visibles[i] ? 0 : 1,
+                      transition: "opacity .06s linear",
+                    }}
+                  />
                 </button>
-            </div>
+              </div>
             ))}
 
             {/* AutoSmooth */}
-            <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8, justifyContent: "flex-end" }}>
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                marginTop: 8,
+                justifyContent: "flex-end",
+              }}
+            >
               <label style={{ display: "inline-flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
                 <input type="checkbox" checked={autoSmooth} onChange={(e) => setAutoSmooth(e.target.checked)} />
                 <span>Auto smooth</span>
               </label>
               <span style={{ opacity: 0.8, fontSize: 12 }}>Úhel: {Math.round(smoothAngle)}°</span>
-              <input className="slider" type="range" min={0} max={80} step={1} value={smoothAngle} onChange={(e) => setSmoothAngle(parseFloat(e.target.value))} style={{ width: 120 }} />
+              <input
+                className="slider"
+                type="range"
+                min={0}
+                max={80}
+                step={1}
+                value={smoothAngle}
+                onChange={(e) => setSmoothAngle(parseFloat(e.target.value))}
+                style={{ width: 120 }}
+              />
             </div>
           </>
         )}
@@ -854,12 +971,14 @@ export default function ClientPage() {
       >
         {!fatal && (
           <>
-            <ambientLight intensity={lightIntensity * 0.4 * (headlightCfg.enabled ? 0.5 : 1)} />
-            <directionalLight position={[0, 5, 5]} intensity={lightIntensity * 1.5 * (headlightCfg.enabled ? 0.5 : 1)} />
-            <directionalLight position={[-10, 0, 0]} intensity={lightIntensity * 1.0 * (headlightCfg.enabled ? 0.5 : 1)} />
-            <directionalLight position={[10, 0, 0]} intensity={lightIntensity * 1.2 * (headlightCfg.enabled ? 0.5 : 1)} />
-            <directionalLight position={[0, -5, -5]} intensity={lightIntensity * 0.8 * (headlightCfg.enabled ? 0.5 : 1)} />
+            <ambientLight intensity={lightIntensity * 0.4 * fillDim} />
+            {/* Key/fill světla (pevná) */}
+            <directionalLight position={[lightPos1.x, lightPos1.y, lightPos1.z]} intensity={lightIntensity * 1.5 * fillDim} />
+            <directionalLight position={[lightPos2.x, lightPos2.y, lightPos2.z]} intensity={lightIntensity * 1.0 * fillDim} />
+            <directionalLight position={[lightPos3.x, lightPos3.y, lightPos3.z]} intensity={lightIntensity * 1.2 * fillDim} />
+            <directionalLight position={[lightPos4.x, lightPos4.y, lightPos4.z]} intensity={lightIntensity * 0.8 * fillDim} />
 
+            {/* Headlight (z manifestu/URL) */}
             <Headlight enabled={headlightCfg.enabled} intensity={headlightCfg.intensity} />
 
             <group ref={rootRef}>
@@ -901,14 +1020,50 @@ export default function ClientPage() {
 
       {/* Globální styly */}
       <style jsx global>{`
-        .slider { appearance: none; height: 14px; background: transparent; margin: 5px 0; display: inline-block; }
-        .slider::-webkit-slider-runnable-track { height: 4px; background: white; border-radius: 2px; }
-        .slider::-webkit-slider-thumb { appearance: none; width: 14px; height: 14px; border-radius: 50%; background: white; cursor: pointer; box-shadow: 0 0 2px black; margin-top: -5px; }
-        .slider::-moz-range-track { height: 4px; background: white; border-radius: 2px; }
-        .slider::-moz-range-thumb { width: 14px; height: 14px; border-radius: 50%; background: white; cursor: pointer; box-shadow: 0 0 2px black; border: none; }
+        .slider {
+          appearance: none;
+          height: 14px;
+          background: transparent;
+          margin: 5px 0;
+          display: inline-block;
+        }
+        .slider::-webkit-slider-runnable-track {
+          height: 4px;
+          background: white;
+          border-radius: 2px;
+        }
+        .slider::-webkit-slider-thumb {
+          appearance: none;
+          width: 14px;
+          height: 14px;
+          border-radius: 50%;
+          background: white;
+          cursor: pointer;
+          box-shadow: 0 0 2px black;
+          margin-top: -5px;
+        }
+        .slider::-moz-range-track {
+          height: 4px;
+          background: white;
+          border-radius: 2px;
+        }
+        .slider::-moz-range-thumb {
+          width: 14px;
+          height: 14px;
+          border-radius: 50%;
+          background: white;
+          cursor: pointer;
+          box-shadow: 0 0 2px black;
+          border: none;
+        }
 
         @media (max-width: 720px) {
-          .controls-panel { left: 8px !important; right: 8px; width: auto !important; max-width: calc(100vw - 16px) !important; }
+          .controls-panel {
+            left: 8px !important;
+            right: 8px;
+            width: auto !important;
+            max-width: calc(100vw - 16px) !important;
+          }
         }
       `}</style>
     </div>
