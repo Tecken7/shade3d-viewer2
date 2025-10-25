@@ -34,7 +34,8 @@ function inferExt(nameOrUrl) {
 }
 
 /* ---------- Auto Smooth ---------- */
-function autoSmoothGeometry(geometry, angleDeg = 30) {
+const DEFAULT_SMOOTH_ANGLE = 30
+function autoSmoothGeometry(geometry, angleDeg = DEFAULT_SMOOTH_ANGLE) {
   const angle = Math.max(0, Math.min(89.9, angleDeg))
   const angleRad = (angle * Math.PI) / 180
 
@@ -109,7 +110,7 @@ function InlineLoader({ text }) {
 function AnyModel({
   name, url,
   color, opacity, visible,
-  onLoaded, autoSmooth, smoothAngle,
+  onLoaded, autoSmooth,
   roughness = 0.5, metalness = 0.5,
   useVertexColors = false,
   keepMaterials = false,
@@ -139,7 +140,7 @@ function AnyModel({
         if (ext === "stl") {
           const geom = await new STLLoader().loadAsync(url)
           if (!geom.attributes.normal) geom.computeVertexNormals()
-          const base = autoSmooth ? autoSmoothGeometry(geom, smoothAngle) : (geom.computeVertexNormals(), geom)
+          const base = autoSmooth ? autoSmoothGeometry(geom, DEFAULT_SMOOTH_ANGLE) : (geom.computeVertexNormals(), geom)
           const mat = makeMat()
           obj = new THREE.Mesh(base, mat)
           obj.userData._baseGeom = geom
@@ -148,7 +149,7 @@ function AnyModel({
           const geom = await new PLYLoader().loadAsync(url)
           const hasVC = !!geom.getAttribute("color")
           let base = geom
-          if (autoSmooth) base = autoSmoothGeometry(geom, smoothAngle)
+          if (autoSmooth) base = autoSmoothGeometry(geom, DEFAULT_SMOOTH_ANGLE)
           else if (!geom.attributes.normal) geom.computeVertexNormals()
           const mat = hasVC && useVertexColors
             ? makeMat({ vertexColors: true, color: new THREE.Color("#ffffff") })
@@ -189,31 +190,28 @@ function AnyModel({
       }
     })()
     return () => { cancelled = true }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [url, ext])
+  }, [url, ext, autoSmooth, opacity, color, roughness, metalness, useVertexColors, keepMaterials])
 
-  // AutoSmooth re-aplikace při změně
+  // Re-aplikace autoSmooth při změně toggle
   useEffect(() => {
     if (!object3D) return
     object3D.traverse((child) => {
       if (!child.isMesh) return
       if (!child.userData._baseGeom) child.userData._baseGeom = child.geometry
       const base = child.userData._baseGeom
-
       let newGeom = base
-      if (autoSmooth) newGeom = autoSmoothGeometry(base, smoothAngle)
+      if (autoSmooth) newGeom = autoSmoothGeometry(base, DEFAULT_SMOOTH_ANGLE)
       else {
         newGeom = base.clone()
         newGeom.computeVertexNormals()
       }
-
       if (child.userData._derivedGeom && child.userData._derivedGeom !== base) {
         child.userData._derivedGeom.dispose()
       }
       child.geometry = newGeom
       child.userData._derivedGeom = newGeom
     })
-  }, [object3D, autoSmooth, smoothAngle])
+  }, [object3D, autoSmooth])
 
   // Materiál a vzhled – respektuje VC/keepMaterials
   useEffect(() => {
@@ -386,8 +384,7 @@ function Lightbox({ open, onClose, src, alt }) {
 
 /* ---------- Hlavní komponenta ---------- */
 export default function ClientPage() {
-  // světla – řídí se manifestem/URL, ne přes UI
-  const [lightIntensity, setLightIntensity] = useState(1)
+  const [lightIntensity] = useState(1)
   const [headlightCfg, setHeadlightCfg] = useState({ enabled: true, intensity: 2.0 })
 
   const [uiReady, setUiReady] = useState(false)
@@ -412,18 +409,14 @@ export default function ClientPage() {
   const [metalnesses, setMetalnesses] = useState([])
   const [fatal, setFatal] = useState(null)
 
-  // auto smooth
+  // Auto smooth (jen toggle)
   const [autoSmooth, setAutoSmooth] = useState((getParam("smooth") ?? "1") !== "0")
-  const [smoothAngle, setSmoothAngle] = useState(() => {
-    const v = parseFloat(getParam("smoothAngle") ?? "30")
-    return isFinite(v) ? Math.max(0, Math.min(80, v)) : 30
-  })
 
   const [logoCfg, setLogoCfg] = useState({ url: DEFAULT_LOGO, opacity: 0.9, width: 160, pos: "bc" })
 
   // fotky (z manifestu)
   const [photos, setPhotos] = useState([]) // {n,u,w,h}
-  const [photoPanelOpen, setPhotoPanelOpen] = useState(false)
+  const [photosOpenMobile, setPhotosOpenMobile] = useState(false)
   const [lightbox, setLightbox] = useState({ open: false, src: null, alt: "" })
 
   // camera targeting
@@ -623,141 +616,34 @@ export default function ClientPage() {
     />
   )
 
-  // ref na root group v Canvasu
   const rootRef = useRef()
-
-  // když je headlight aktivní, lehce stáhneme fill světla, aby byl efekt čitelný
   const fillDim = headlightCfg.enabled ? 0.5 : 1
 
-  // fotostrip (desktop) / tlačítko (mobil)
-  const photoStrip = (
-    <>
-      {/* Desktop fotostrip vlevo */}
-      {!isMobile && photos && photos.length > 0 && (
-        <div
-          style={{
-            position: "absolute",
-            top: 10, left: 10, bottom: 10,
-            width: 90,
-            display: "flex",
-            flexDirection: "column",
-            gap: 8,
-            padding: 8,
-            overflow: "auto",
-            borderRadius: 10,
-            border: "1px solid rgba(255,255,255,.15)",
-            background: "rgba(0,0,0,.25)",
-            backdropFilter: "blur(3px)",
-            zIndex: 2,
-          }}
-        >
-          {photos.map((p, i) => (
-            <button
-              key={i}
-              onClick={() => setLightbox({ open: true, src: p.u, alt: p.n || `Photo ${i+1}` })}
-              style={{
-                display: "block",
-                padding: 0, margin: 0, border: "none",
-                background: "transparent", cursor: "pointer",
-                borderRadius: 8, overflow: "hidden",
-                boxShadow: "0 1px 6px rgba(0,0,0,.35)",
-                border: "1px solid rgba(255,255,255,.12)"
-              }}
-              title={p.n || ""}
-            >
-              <img
-                src={p.u}
-                alt={p.n || ""}
-                loading="lazy"
-                style={{ display: "block", width: "100%", height: 72, objectFit: "cover" }}
-              />
-            </button>
-          ))}
-        </div>
-      )}
-
-      {/* Mobil – tlačítko Fotky */}
-      {isMobile && photos && photos.length > 0 && (
-        <>
-          <button
-            onClick={() => setPhotoPanelOpen(v => !v)}
-            style={{
-              position: "absolute", top: 10, left: 10, zIndex: 3,
-              background: "rgba(0,0,0,.45)", color: "white",
-              border: "1px solid rgba(255,255,255,.2)", borderRadius: 10,
-              padding: "8px 12px", fontSize: 14, fontWeight: 600
-            }}
-          >
-            Fotky ({photos.length})
-          </button>
-          {photoPanelOpen && (
-            <div
-              onClick={() => setPhotoPanelOpen(false)}
-              style={{
-                position: "absolute", inset: 0, zIndex: 2,
-                background: "rgba(0,0,0,.45)"
-              }}
-            >
-              <div
-                onClick={(e) => e.stopPropagation()}
-                style={{
-                  position: "absolute", top: 56, left: 8, right: 8,
-                  padding: 10,
-                  borderRadius: 12,
-                  border: "1px solid rgba(255,255,255,.18)",
-                  background: "rgba(0,0,0,.8)",
-                  maxHeight: "50vh", overflow: "auto",
-                  display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 8,
-                }}
-              >
-                {photos.map((p, i) => (
-                  <button
-                    key={i}
-                    onClick={() => {
-                      setPhotoPanelOpen(false)
-                      setLightbox({ open: true, src: p.u, alt: p.n || `Photo ${i+1}` })
-                    }}
-                    style={{
-                      padding: 0, margin: 0, border: "none",
-                      background: "transparent", cursor: "pointer",
-                      borderRadius: 8, overflow: "hidden",
-                      boxShadow: "0 1px 6px rgba(0,0,0,.35)",
-                      border: "1px solid rgba(255,255,255,.12)"
-                    }}
-                    title={p.n || ""}
-                  >
-                    <img
-                      src={p.u}
-                      alt={p.n || ""}
-                      loading="lazy"
-                      style={{ display: "block", width: "100%", height: 72, objectFit: "cover" }}
-                    />
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-        </>
-      )}
-    </>
-  )
-
-  return (
-    <div className="stage" style={{ position: "relative", width: "100vw", height: "100vh", background: "black" }}>
-      {logoEl}
-
-      {/* Ovládací panel – zjednodušený: jen per-model barva/opacity/visibility + AutoSmooth */}
+  // SIDEBAR vlevo (ovládání + fotky pod ním)
+  const sidebar = (
+    <div
+      className="sidebar"
+      style={{
+        position: "absolute",
+        top: 10, left: 10, zIndex: 2,
+        width: "clamp(260px, 28vw, 420px)",
+        maxWidth: "calc(100vw - 20px)",
+        color: "white", fontFamily: "sans-serif", fontSize: 14,
+        backdropFilter: "blur(3px)", background: "rgba(0,0,0,.25)",
+        border: "1px solid rgba(255,255,255,.15)", borderRadius: 10,
+        padding: 10,
+        boxSizing: "border-box",
+        maxHeight: "calc(100vh - 20px)",
+        overflowY: "auto",
+      }}
+    >
+      {/* Ovládání */}
       <div
-        className="controls-panel"
         style={{
-          position: "absolute",
-          top: 10, right: 10, zIndex: 2,
-          color: "white", fontFamily: "sans-serif", fontSize: "14px",
-          opacity: uiReady ? 1 : 0, transition: "opacity .12s ease",
-          backdropFilter: "blur(3px)", background: "rgba(0,0,0,.25)",
-          border: "1px solid rgba(255,255,255,.15)", borderRadius: 8,
-          padding: "8px 10px", width: "clamp(240px, 30vw, 420px)",
-          maxWidth: "calc(100vw - 20px)", boxSizing: "border-box",
+          border: "1px solid rgba(255,255,255,.15)",
+          borderRadius: 10,
+          padding: 10,
+          background: "rgba(255,255,255,.06)",
         }}
       >
         {fatal ? (
@@ -765,7 +651,7 @@ export default function ClientPage() {
         ) : (
           <>
             {title && (
-              <div title={title} style={{ marginBottom: 8, maxWidth: 280, padding: "6px 10px", borderRadius: 8, border: "1px solid rgba(255,255,255,.18)", background: "rgba(255,255,255,.08)", fontSize: 13, fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+              <div title={title} style={{ marginBottom: 8, padding: "6px 10px", borderRadius: 8, border: "1px solid rgba(255,255,255,.18)", background: "rgba(255,255,255,.08)", fontSize: 13, fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                 {title}
               </div>
             )}
@@ -780,7 +666,7 @@ export default function ClientPage() {
                   {stripExt(f.name)}:
                 </div>
 
-                {/* Swatch (jednoduchý – otevře nativní color input) */}
+                {/* Barva */}
                 <input
                   type="color"
                   value={colors[i] ?? "#ffffff"}
@@ -789,7 +675,7 @@ export default function ClientPage() {
                   style={{ width: 36, height: 22, border: "1px solid #fff", borderRadius: 4, background: colors[i] ?? "#ffffff", padding: 0, cursor: "pointer" }}
                 />
 
-                {/* Slider – Opacity */}
+                {/* Opacity */}
                 <input
                   className="slider"
                   type="range"
@@ -803,7 +689,7 @@ export default function ClientPage() {
                   aria-label={`${f.name} opacity`}
                 />
 
-                {/* Eye */}
+                {/* Viditelnost */}
                 <button
                   className={`toggle icon-btn ${visibles[i] ? "is-on" : "is-off"}`}
                   onClick={() => setVisibles((prev) => prev.map((v, idx) => (idx === i ? !v : v)))}
@@ -820,20 +706,85 @@ export default function ClientPage() {
               </div>
             ))}
 
-            {/* AutoSmooth */}
-            <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8, justifyContent: "flex-end" }}>
+            {/* AutoSmooth – jen toggle */}
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 6, justifyContent: "space-between" }}>
+              <span style={{ opacity: 0.8 }}>Auto smooth (30°)</span>
               <label style={{ display: "inline-flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
                 <input type="checkbox" checked={autoSmooth} onChange={(e) => setAutoSmooth(e.target.checked)} />
-                <span>Auto smooth</span>
+                <span>{autoSmooth ? "Zapnuto" : "Vypnuto"}</span>
               </label>
-              <span style={{ opacity: 0.8, fontSize: 12 }}>Úhel: {Math.round(smoothAngle)}°</span>
-              <input className="slider" type="range" min={0} max={80} step={1} value={smoothAngle} onChange={(e) => setSmoothAngle(parseFloat(e.target.value))} style={{ width: 120 }} />
             </div>
           </>
         )}
       </div>
 
-      {photoStrip}
+      {/* Fotky – pod ovládáním, výška podle obsahu */}
+      {photos && photos.length > 0 && (
+        <div style={{ marginTop: 10 }}>
+          {/* Desktop titulek / Mobil tlačítko */}
+          {!isMobile ? (
+            <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 8, opacity: 0.9 }}>
+              Fotky ({photos.length})
+            </div>
+          ) : (
+            <button
+              onClick={() => setPhotosOpenMobile(v => !v)}
+              style={{
+                width: "100%",
+                background: "rgba(0,0,0,.45)", color: "white",
+                border: "1px solid rgba(255,255,255,.2)", borderRadius: 10,
+                padding: "8px 12px", fontSize: 14, fontWeight: 600
+              }}
+            >
+              Fotky ({photos.length}) {photosOpenMobile ? "▴" : "▾"}
+            </button>
+          )}
+
+          {/* Grid s wrapem (desktop vždy viditelný, mobil dle collapsu) */}
+          {(!isMobile || photosOpenMobile) && (
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fill, minmax(72px, 1fr))",
+                gap: 8,
+                border: "1px solid rgba(255,255,255,.15)",
+                borderRadius: 10,
+                background: "rgba(255,255,255,.06)",
+                padding: 8,
+              }}
+            >
+              {photos.map((p, i) => (
+                <button
+                  key={i}
+                  onClick={() => setLightbox({ open: true, src: p.u, alt: p.n || `Photo ${i+1}` })}
+                  style={{
+                    padding: 0, margin: 0, border: "none",
+                    background: "transparent", cursor: "pointer",
+                    borderRadius: 8, overflow: "hidden",
+                    boxShadow: "0 1px 6px rgba(0,0,0,.35)",
+                    border: "1px solid rgba(255,255,255,.12)"
+                  }}
+                  title={p.n || ""}
+                >
+                  <img
+                    src={p.u}
+                    alt={p.n || ""}
+                    loading="lazy"
+                    style={{ display: "block", width: "100%", height: 72, objectFit: "cover" }}
+                  />
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+
+  return (
+    <div className="stage" style={{ position: "relative", width: "100vw", height: "100vh", background: "black" }}>
+      {logoEl}
+      {sidebar}
 
       {/* CANVAS */}
       <Canvas
@@ -845,14 +796,11 @@ export default function ClientPage() {
       >
         {!fatal && (
           <>
-            <ambientLight intensity={lightIntensity * 0.4 * (headlightCfg.enabled ? 0.5 : 1)} />
-            {/* Key/fill světla (pevná) */}
-            <directionalLight position={[0, 5, 5]} intensity={lightIntensity * 1.5 * (headlightCfg.enabled ? 0.5 : 1)} />
-            <directionalLight position={[-10, 0, 0]} intensity={lightIntensity * 1.0 * (headlightCfg.enabled ? 0.5 : 1)} />
-            <directionalLight position={[10, 0, 0]} intensity={lightIntensity * 1.2 * (headlightCfg.enabled ? 0.5 : 1)} />
-            <directionalLight position={[0, -5, -5]} intensity={lightIntensity * 0.8 * (headlightCfg.enabled ? 0.5 : 1)} />
-
-            {/* Headlight (z manifestu/URL) */}
+            <ambientLight intensity={lightIntensity * 0.4 * fillDim} />
+            <directionalLight position={[0, 5, 5]} intensity={lightIntensity * 1.5 * fillDim} />
+            <directionalLight position={[-10, 0, 0]} intensity={lightIntensity * 1.0 * fillDim} />
+            <directionalLight position={[10, 0, 0]} intensity={lightIntensity * 1.2 * fillDim} />
+            <directionalLight position={[0, -5, -5]} intensity={lightIntensity * 0.8 * fillDim} />
             <Headlight enabled={headlightCfg.enabled} intensity={headlightCfg.intensity} />
 
             <group ref={rootRef}>
@@ -867,7 +815,6 @@ export default function ClientPage() {
                     visible={visibles[i] ?? true}
                     onLoaded={handleModelLoaded}
                     autoSmooth={autoSmooth}
-                    smoothAngle={smoothAngle}
                     roughness={roughnesses[i] ?? (typeof f.r === "number" ? f.r : 0.5)}
                     metalness={metalnesses[i] ?? (typeof f.m === "number" ? f.m : 0.5)}
                     useVertexColors={!!f.vc}
@@ -904,9 +851,9 @@ export default function ClientPage() {
         .slider::-moz-range-thumb { width: 14px; height: 14px; border-radius: 50%; background: white; cursor: pointer; box-shadow: 0 0 2px black; border: none; }
 
         @media (max-width: 720px) {
-          .controls-panel {
-            right: 8px !important;
-            width: auto !important;
+          .sidebar {
+            left: 8px !important;
+            width: calc(100vw - 16px) !important;
             max-width: calc(100vw - 16px) !important;
           }
         }
