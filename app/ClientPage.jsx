@@ -252,7 +252,7 @@ function Headlight({ enabled = true, intensity = 2, color = "#ffffff" }) {
   return <pointLight ref={ref} color={color} intensity={enabled ? intensity : 0} distance={0} decay={0} />
 }
 
-/* ---------- Trackball (rychlý a konzistentní pan) ---------- */
+/* ---------- Trackball (konzistentní pan) ---------- */
 function TouchTrackballControls({ target = [0, 0, 0] }) {
   const { camera, gl, size } = useThree()
   const controlsRef = useRef(null)
@@ -261,8 +261,8 @@ function TouchTrackballControls({ target = [0, 0, 0] }) {
     const controls = new TrackballControls(camera, gl.domElement)
     controls.rotateSpeed = 5.0
     controls.zoomSpeed = 1.2
-    controls.panSpeed = 1.0      // přepočítáváme ve frame
-    controls.staticMoving = true // bez gumového dojezdu
+    controls.panSpeed = 1.0       // přepočítáme ve frame
+    controls.staticMoving = true
     controls.dynamicDampingFactor = 0.12
     controlsRef.current = controls
 
@@ -278,28 +278,24 @@ function TouchTrackballControls({ target = [0, 0, 0] }) {
     }
   }, [camera, gl])
 
-  // target
-  useEffect(() => {
-    if (!controlsRef.current) return
-    controlsRef.current.target.set(target[0], target[1], target[2])
-    controlsRef.current.update()
-  }, [target])
-
-  // po resize
   useEffect(() => {
     const c = controlsRef.current
     if (!c) return
-    c.handleResize()
+    c.target.set(target[0], target[1], target[2])
+    c.update()
+  }, [target])
+
+  useEffect(() => {
+    controlsRef.current?.handleResize()
   }, [size.width, size.height])
 
   useFrame(() => {
     const c = controlsRef.current
     if (!c) return
-    // škáluj panSpeed podle velikosti canvasu a zoomu (pocitově 1:1 k pixelům)
-    const K = 0.004         // zvyšit → rychlejší pan, snížit → pomalejší
+    // sjednocená rychlost panu: škálujeme jen velikostí okna (ne zoomem)
+    const K = 0.004 // doladění citlivosti
     const pixels = Math.max(size.width, size.height)
-    const z = Math.max(camera.zoom || 1, 0.0001)
-    c.panSpeed = (pixels * K) / z
+    c.panSpeed = pixels * K
     c.update()
   })
 
@@ -359,7 +355,7 @@ function AutoCenterAndFrame({
     let newZoom = Math.min(zoomX, zoomY)
     newZoom *= isMobile ? mobileScale : desktopScale
 
-    // *** fix clippingu po resize ***
+    // fix clippingu po resize
     const depth = Math.max(dims2.z, Math.max(dims2.x, dims2.y) * 0.75) || 1
     const safeDist = depth * 4
     camera.near = Math.max(0.01, safeDist * 0.001)
