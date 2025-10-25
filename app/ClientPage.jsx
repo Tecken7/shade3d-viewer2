@@ -308,7 +308,7 @@ function RightButtonPan({ setTarget }) {
   const pointerIdRef = useRef(null)
 
   // Jemné doladění – 1.0 = přesně 1px → 1px ve světě podle frustumu
-  const PAN_SENSITIVITY = 0.25
+  const PAN_SENSITIVITY = 0.85
 
   const right = new THREE.Vector3()
   const up = new THREE.Vector3()
@@ -948,3 +948,4 @@ export default function ClientPage() {
     </div>
   )
 }
+
