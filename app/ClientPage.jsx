@@ -251,7 +251,7 @@ function Headlight({ enabled = true, intensity = 2, color = "#ffffff" }) {
   return <pointLight ref={ref} color={color} intensity={enabled ? intensity : 0} distance={0} decay={0} />
 }
 
-/* ---------- Trackball (jen rotace/zoom) + vlastní pan pro pravé tlačítko ---------- */
+/* ---------- Trackball (jen rotace/zoom) ---------- */
 function TouchTrackballControls({ target = [0, 0, 0] }) {
   const { camera, gl, size } = useThree()
   const controlsRef = useRef(null)
@@ -263,11 +263,10 @@ function TouchTrackballControls({ target = [0, 0, 0] }) {
     controls.panSpeed = 0.0            // vypneme interní pan
     controls.staticMoving = true
     controls.dynamicDampingFactor = 0.12
-    // mapování tlačítek: pravé = ROTATE (aby trackball NIKDY nepanoval)
     controls.mouseButtons = {
       LEFT: THREE.MOUSE.ROTATE,
       MIDDLE: THREE.MOUSE.ZOOM,
-      RIGHT: THREE.MOUSE.ROTATE,
+      RIGHT: THREE.MOUSE.ROTATE,       // pravé tlačítko si řešíme sami
     }
     controlsRef.current = controls
 
@@ -301,27 +300,29 @@ function TouchTrackballControls({ target = [0, 0, 0] }) {
   return null
 }
 
-/* ---------- Vlastní pan (pravé tlačítko) – pixel-přesný a konzistentní ---------- */
+/* ---------- Vlastní pan (pravé tlačítko) – pixel-přesný a mírnější ---------- */
 function RightButtonPan({ setTarget }) {
   const { camera, gl, size } = useThree()
   const isPanning = useRef(false)
   const last = useRef({ x: 0, y: 0 })
+  const pointerIdRef = useRef(null)
+
+  // Citlivost panu: 1.0 = 1:1 pixel → světová jednotka dle frustumu
+  // Snížili jsme ~4×.
+  const PAN_SENSITIVITY = 0.25
 
   useEffect(() => {
     const el = gl.domElement
 
-    const onContext = (e) => {
-      // aby se neotvíral kontextový panel
-      e.preventDefault()
-    }
+    const onContext = (e) => { e.preventDefault() }
 
     const onDown = (e) => {
-      // jen pravé tlačítko (nebo Ctrl+Left jako fallback)
       if ((e.button !== 2) && !(e.button === 0 && e.ctrlKey)) return
       e.preventDefault()
       isPanning.current = true
       last.current = { x: e.clientX, y: e.clientY }
-      el.setPointerCapture?.(e.pointerId || 1)
+      pointerIdRef.current = e.pointerId
+      try { el.setPointerCapture?.(e.pointerId) } catch {}
     }
 
     const onMove = (e) => {
@@ -332,20 +333,19 @@ function RightButtonPan({ setTarget }) {
       last.current = { x: e.clientX, y: e.clientY }
 
       if (camera.isOrthographicCamera) {
-        // světové jednotky na pixel (ortho je konstantní – nezávislé na Z)
         const wppX = (camera.right - camera.left) / size.width
         const wppY = (camera.top - camera.bottom) / size.height
-        const moveX = -dx * wppX
-        const moveY =  dy * wppY  // obrazovkové Y je opačně
+
+        const moveX = -dx * wppX * PAN_SENSITIVITY
+        const moveY =  dy * wppY * PAN_SENSITIVITY
 
         camera.position.x += moveX
         camera.position.y += moveY
         camera.updateProjectionMatrix()
         setTarget?.((t) => [t[0] + moveX, t[1] + moveY, t[2]])
       } else {
-        // fallback pro perspektivu (nepoužíváme, ale ať je to robustní)
         const distance = camera.position.length()
-        const scale = distance / Math.max(size.width, size.height)
+        const scale = (distance / Math.max(size.width, size.height)) * PAN_SENSITIVITY
         const moveX = -dx * scale
         const moveY =  dy * scale
         camera.position.x += moveX
@@ -358,7 +358,8 @@ function RightButtonPan({ setTarget }) {
       if (!isPanning.current) return
       e.preventDefault()
       isPanning.current = false
-      try { el.releasePointerCapture?.(e.pointerId || 1) } catch {}
+      try { el.releasePointerCapture?.(pointerIdRef.current) } catch {}
+      pointerIdRef.current = null
     }
 
     el.addEventListener("contextmenu", onContext)
@@ -415,7 +416,6 @@ function AutoCenterAndFrame({
       setTarget([centerAll.x, centerAll.y, centerAll.z])
     }
 
-    // recompute po centrování
     const after = new THREE.Box3().setFromObject(root)
     const dims2 = new THREE.Vector3()
     const ctr = new THREE.Vector3()
@@ -429,7 +429,6 @@ function AutoCenterAndFrame({
     let newZoom = Math.min(zoomX, zoomY)
     newZoom *= isMobile ? mobileScale : desktopScale
 
-    // bezpečné near/far + pozice kamery → žádný „ořez“ ani na malém okně
     const depth = Math.max(dims2.z, Math.max(dims2.x, dims2.y) * 0.75) || 1
     const safeDist = depth * 4
     camera.near = Math.max(0.01, safeDist * 0.001)
