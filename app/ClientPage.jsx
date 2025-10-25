@@ -131,7 +131,7 @@ function AnyModel({
       ...opts,
     })
 
-  // Načítání modelu (nezávislé na autoSmooth)
+  // Load (nezávislé na autoSmooth)
   useEffect(() => {
     let cancelled = false
     setLoading(true)
@@ -193,7 +193,7 @@ function AnyModel({
     return () => { cancelled = true }
   }, [url, ext])
 
-  // Re-aplikace smoothingu (není reload, neresetuje kameru)
+  // Re-smoothing (bez resetu kamery)
   useEffect(() => {
     if (!object3D) return
     object3D.traverse((child) => {
@@ -211,7 +211,7 @@ function AnyModel({
     })
   }, [object3D, autoSmooth])
 
-  // Materiály při změně vzhledu
+  // Materiály
   useEffect(() => {
     if (!object3D) return
     object3D.traverse((child) => {
@@ -252,7 +252,7 @@ function Headlight({ enabled = true, intensity = 2, color = "#ffffff" }) {
   return <pointLight ref={ref} color={color} intensity={enabled ? intensity : 0} distance={0} decay={0} />
 }
 
-/* ---------- Trackball ---------- */
+/* ---------- Trackball (rychlý a konzistentní pan) ---------- */
 function TouchTrackballControls({ target = [0, 0, 0] }) {
   const { camera, gl, size } = useThree()
   const controlsRef = useRef(null)
@@ -261,8 +261,9 @@ function TouchTrackballControls({ target = [0, 0, 0] }) {
     const controls = new TrackballControls(camera, gl.domElement)
     controls.rotateSpeed = 5.0
     controls.zoomSpeed = 1.2
-    controls.panSpeed = 0.6     // počáteční
-    controls.staticMoving = true
+    controls.panSpeed = 1.0      // přepočítáváme ve frame
+    controls.staticMoving = true // bez gumového dojezdu
+    controls.dynamicDampingFactor = 0.12
     controlsRef.current = controls
 
     const ts = (e) => { e.preventDefault(); controls.handleTouchStart(e) }
@@ -277,14 +278,14 @@ function TouchTrackballControls({ target = [0, 0, 0] }) {
     }
   }, [camera, gl])
 
-  // update target
+  // target
   useEffect(() => {
     if (!controlsRef.current) return
     controlsRef.current.target.set(target[0], target[1], target[2])
     controlsRef.current.update()
   }, [target])
 
-  // *DŮLEŽITÉ*: po resize zavolej handleResize a uprav panSpeed podle zoomu
+  // po resize
   useEffect(() => {
     const c = controlsRef.current
     if (!c) return
@@ -294,9 +295,11 @@ function TouchTrackballControls({ target = [0, 0, 0] }) {
   useFrame(() => {
     const c = controlsRef.current
     if (!c) return
-    // stabilní pan napříč zoomy/velikostmi
+    // škáluj panSpeed podle velikosti canvasu a zoomu (pocitově 1:1 k pixelům)
+    const K = 0.004         // zvyšit → rychlejší pan, snížit → pomalejší
+    const pixels = Math.max(size.width, size.height)
     const z = Math.max(camera.zoom || 1, 0.0001)
-    c.panSpeed = 0.6 / z           // větší zoom => jemnější pan; malý zoom => rychlejší
+    c.panSpeed = (pixels * K) / z
     c.update()
   })
 
@@ -356,13 +359,12 @@ function AutoCenterAndFrame({
     let newZoom = Math.min(zoomX, zoomY)
     newZoom *= isMobile ? mobileScale : desktopScale
 
-    // *** FIX CLIPPINGU ***
-    // nastav near/far podle hloubky objektu (bezpečný buffer)
+    // *** fix clippingu po resize ***
     const depth = Math.max(dims2.z, Math.max(dims2.x, dims2.y) * 0.75) || 1
     const safeDist = depth * 4
     camera.near = Math.max(0.01, safeDist * 0.001)
     camera.far = safeDist * 50 + 100
-    camera.position.set(ctr.x, ctr.y, ctr.z + safeDist) // bezpečně před scénou
+    camera.position.set(ctr.x, ctr.y, ctr.z + safeDist)
     camera.zoom = Math.max(newZoom, 0.01)
     camera.updateProjectionMatrix()
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -407,10 +409,7 @@ function Switch({ checked, onChange, label }) {
       onChange(!checked)
     }
   }
-
-  const TRACK_W = 38
-  const TRACK_H = 22
-  const KNOB = 18
+  const TRACK_W = 38, TRACK_H = 22, KNOB = 18
 
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -423,15 +422,13 @@ function Switch({ checked, onChange, label }) {
         onKeyDown={handleKey}
         style={{
           position: "relative",
-          width: TRACK_W,
-          height: TRACK_H,
+          width: TRACK_W, height: TRACK_H,
           borderRadius: 999,
           border: "1px solid rgba(255,255,255,.22)",
           background: checked ? "rgba(59,130,246,.45)" : "rgba(255,255,255,.10)",
           cursor: "pointer",
           transition: "background .15s ease, border-color .15s ease",
-          outline: "none",
-          padding: 0,
+          outline: "none", padding: 0,
         }}
         title={checked ? "Vypnout Auto smooth" : "Zapnout Auto smooth"}
       >
@@ -439,13 +436,10 @@ function Switch({ checked, onChange, label }) {
           aria-hidden
           style={{
             position: "absolute",
-            top: "50%",
-            transform: "translateY(-50%)",
+            top: "50%", transform: "translateY(-50%)",
             left: checked ? TRACK_W - KNOB - 3 : 3,
-            width: KNOB,
-            height: KNOB,
-            borderRadius: "50%",
-            background: "#fff",
+            width: KNOB, height: KNOB,
+            borderRadius: "50%", background: "#fff",
             boxShadow: "0 1px 3px rgba(0,0,0,.35)",
             transition: "left .15s ease",
           }}
@@ -479,7 +473,7 @@ export default function ClientPage() {
   const [metalnesses, setMetalnesses] = useState([])
   const [fatal, setFatal] = useState(null)
 
-  // Auto smooth (switch)
+  // Auto smooth
   const [autoSmooth, setAutoSmooth] = useState((getParam("smooth") ?? "1") !== "0")
 
   const [logoCfg, setLogoCfg] = useState({ url: DEFAULT_LOGO, opacity: 0.9, width: 160, pos: "bc" })
@@ -538,19 +532,10 @@ export default function ClientPage() {
           })
 
           const hl = m?.lights?.headlight
-          if (hl && typeof hl === "object") {
-            setHeadlightCfg({
-              enabled: typeof hl.enabled === "boolean" ? hl.enabled : true,
-              intensity: typeof hl.intensity === "number" ? hl.intensity : 2.0,
-            })
-          } else {
-            const qOn = getParam("headlight")
-            const qI = parseFloat(getParam("headlightI") ?? "NaN")
-            setHeadlightCfg({
-              enabled: qOn == null ? true : qOn !== "0",
-              intensity: isFinite(qI) ? qI : 2.0,
-            })
-          }
+          setHeadlightCfg({
+            enabled: typeof hl?.enabled === "boolean" ? hl.enabled : true,
+            intensity: typeof hl?.intensity === "number" ? hl.intensity : 2.0,
+          })
 
           setPhotos(Array.isArray(m?.photos) ? m.photos.filter(p => p && p.u) : [])
           return
@@ -692,10 +677,8 @@ export default function ClientPage() {
         color: "white", fontFamily: "sans-serif", fontSize: 14,
         backdropFilter: "blur(3px)", background: "rgba(0,0,0,.25)",
         border: "1px solid rgba(255,255,255,.15)", borderRadius: 10,
-        padding: 10,
-        boxSizing: "border-box",
-        maxHeight: "calc(100vh - 20px)",
-        overflowY: "auto",
+        padding: 10, boxSizing: "border-box",
+        maxHeight: "calc(100vh - 20px)", overflowY: "auto",
       }}
     >
       {/* Ovládání */}
@@ -764,11 +747,7 @@ export default function ClientPage() {
             ))}
 
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 10 }}>
-              <Switch
-                checked={autoSmooth}
-                onChange={setAutoSmooth}
-                label="Auto smooth"
-              />
+              <Switch checked={autoSmooth} onChange={setAutoSmooth} label="Auto smooth" />
             </div>
           </>
         )}
