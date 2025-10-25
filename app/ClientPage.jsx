@@ -151,9 +151,11 @@ function AnyModel({
           let base = geom
           if (autoSmooth) base = autoSmoothGeometry(geom, DEFAULT_SMOOTH_ANGLE)
           else if (!geom.attributes.normal) geom.computeVertexNormals()
+
           const mat = hasVC && useVertexColors
             ? makeMat({ vertexColors: true, color: new THREE.Color("#ffffff") })
             : makeMat()
+
           obj = new THREE.Mesh(base, mat)
           obj.userData._baseGeom = geom
           obj.userData._derivedGeom = base
@@ -251,7 +253,7 @@ function Headlight({ enabled = true, intensity = 2, color = "#ffffff" }) {
   return <pointLight ref={ref} color={color} intensity={enabled ? intensity : 0} distance={0} decay={0} />
 }
 
-/* ---------- Trackball (jen rotace/zoom) ---------- */
+/* ---------- Trackball (rotace/zoom s „perfektním“ feel) ---------- */
 function TouchTrackballControls({ target = [0, 0, 0] }) {
   const { camera, gl, size } = useThree()
   const controlsRef = useRef(null)
@@ -260,13 +262,13 @@ function TouchTrackballControls({ target = [0, 0, 0] }) {
     const controls = new TrackballControls(camera, gl.domElement)
     controls.rotateSpeed = 5.0
     controls.zoomSpeed = 1.2
-    controls.panSpeed = 0.0            // pan vypneme – řešíme sami
+    controls.panSpeed = 1.0              // jako ve vzorovém kódu
     controls.staticMoving = true
-    controls.dynamicDampingFactor = 0.12
+    controls.dynamicDampingFactor = 0.15 // lehké dojezdy jako ve vzoru
     controls.mouseButtons = {
       LEFT: THREE.MOUSE.ROTATE,
       MIDDLE: THREE.MOUSE.ZOOM,
-      RIGHT: THREE.MOUSE.ROTATE,       // pravé tlačítko si řešíme sami
+      RIGHT: THREE.MOUSE.ROTATE,        // skutečný pan řešíme customem
     }
     controlsRef.current = controls
 
@@ -289,25 +291,29 @@ function TouchTrackballControls({ target = [0, 0, 0] }) {
     c.update()
   }, [target])
 
+  // stejné jako v referenčním kódu: panSpeed škálujeme zoomem (má vliv i na feel rotace)
+  useFrame(() => {
+    const c = controlsRef.current
+    if (!c) return
+    if (camera.isOrthographicCamera) c.panSpeed = camera.zoom * 0.4
+    c.update()
+  })
+
   useEffect(() => {
     controlsRef.current?.handleResize()
   }, [size.width, size.height])
 
-  useFrame(() => {
-    controlsRef.current?.update()
-  })
-
   return null
 }
 
-/* ---------- Vlastní pan (pravé tlačítko) – screen-space, 1:1 s pixely ---------- */
+/* ---------- Vlastní pan (pravé tlačítko) – screen-space, 1:1 ---------- */
 function RightButtonPan({ setTarget }) {
   const { camera, gl, size } = useThree()
   const isPanning = useRef(false)
   const last = useRef({ x: 0, y: 0 })
   const pointerIdRef = useRef(null)
 
-  // Jemné doladění – 1.0 = přesně 1px → 1px ve světě podle frustumu
+  // ladění rychlosti posunu
   const PAN_SENSITIVITY = 0.85
 
   const right = new THREE.Vector3()
@@ -335,12 +341,10 @@ function RightButtonPan({ setTarget }) {
       const dy = e.clientY - last.current.y
       last.current = { x: e.clientX, y: e.clientY }
 
-      // camera-space axes → world
       right.setFromMatrixColumn(camera.matrixWorld, 0).normalize()
       up.setFromMatrixColumn(camera.matrixWorld, 1).normalize()
 
       if (camera.isOrthographicCamera) {
-        // světové jednotky na pixel, se započtením ZOOMU
         const wppX = ((camera.right - camera.left) / (size.width * camera.zoom))
         const wppY = ((camera.top - camera.bottom) / (size.height * camera.zoom))
         const moveRight = -dx * wppX * PAN_SENSITIVITY
@@ -351,7 +355,6 @@ function RightButtonPan({ setTarget }) {
         setTarget?.((t) => [t[0] + deltaWorld.x, t[1] + deltaWorld.y, t[2] + deltaWorld.z])
         camera.updateProjectionMatrix()
       } else {
-        // fallback pro perspektivu (tady stejně nejedeme)
         const dist = camera.position.length()
         const scale = (dist / Math.max(size.width, size.height)) * PAN_SENSITIVITY
         deltaWorld.copy(right).multiplyScalar(-dx * scale).addScaledVector(up, dy * scale)
@@ -442,8 +445,7 @@ function AutoCenterAndFrame({
     camera.position.set(ctr.x, ctr.y, ctr.z + safeDist)
     camera.zoom = Math.max(newZoom, 0.01)
     camera.updateProjectionMatrix()
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [depsKey, size.width, size.height, isMobile, desktopScale, mobileScale, margin, centerMode])
+  }, [depsKey, size.width, size.height, isMobile, desktopScale, mobileScale, margin, centerMode, setTarget])
 
   return null
 }
@@ -452,26 +454,8 @@ function AutoCenterAndFrame({
 function Lightbox({ open, onClose, src, alt }) {
   if (!open || !src) return null
   return (
-    <div
-      onClick={onClose}
-      style={{
-        position: "fixed", inset: 0, background: "rgba(0,0,0,.85)",
-        display: "flex", alignItems: "center", justifyContent: "center",
-        zIndex: 50,
-      }}
-    >
-      <img
-        src={src}
-        alt={alt || ""}
-        style={{
-          maxWidth: "96vw",
-          maxHeight: "92vh",
-          objectFit: "contain",
-          borderRadius: 12,
-          boxShadow: "0 10px 40px rgba(0,0,0,.6)",
-          border: "1px solid rgba(255,255,255,.15)",
-        }}
-      />
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.85)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50 }}>
+      <img src={src} alt={alt || ""} style={{ maxWidth: "96vw", maxHeight: "92vh", objectFit: "contain", borderRadius: 12, boxShadow: "0 10px 40px rgba(0,0,0,.6)", border: "1px solid rgba(255,255,255,.15)" }} />
     </div>
   )
 }
@@ -538,7 +522,6 @@ export default function ClientPage() {
 
   const [title, setTitle] = useState(null)
 
-  // modely
   const [files, setFiles] = useState([])
   const [colors, setColors] = useState([])
   const [opacities, setOpacities] = useState([])
@@ -547,24 +530,18 @@ export default function ClientPage() {
   const [metalnesses, setMetalnesses] = useState([])
   const [fatal, setFatal] = useState(null)
 
-  // Auto smooth
   const [autoSmooth, setAutoSmooth] = useState((getParam("smooth") ?? "1") !== "0")
 
   const [logoCfg, setLogoCfg] = useState({ url: DEFAULT_LOGO, opacity: 0.9, width: 160, pos: "bc" })
-
-  // fotky
   const [photos, setPhotos] = useState([])
-  const [photosOpenMobile, setPhotosOpenMobile] = useState(false)
   const [lightbox, setLightbox] = useState({ open: false, src: null, alt: "" })
 
-  // kamera
   const [cameraTarget, setCameraTarget] = useState([0, 0, 0])
   const [loadedCount, setLoadedCount] = useState(0)
   const handleModelLoaded = () => setLoadedCount((n) => n + 1)
   const centerParam = (getParam("center") || "combined").toLowerCase()
   const centerMode = ["per", "combined", "none"].includes(centerParam) ? centerParam : "combined"
 
-  // init
   useEffect(() => {
     ;(async () => {
       try {
@@ -572,31 +549,23 @@ export default function ClientPage() {
         if (mId) {
           const manifestUrl = `${SUPABASE_URL}/storage/v1/object/public/${PUBLIC_BUCKET}/manifests/${encodeURIComponent(mId)}.json`
           const m = await fetchJSON(manifestUrl)
-
           const Fs = (m?.files || []).map((x, i) => ({
-            url: x.u,
-            name: stripExt(x.n) || `Model ${i + 1}`,
-            rawName: x.n,
-            c: x.c,
-            o: typeof x.o === "number" ? x.o : 1,
+            url: x.u, name: stripExt(x.n) || `Model ${i + 1}`, rawName: x.n,
+            c: x.c, o: typeof x.o === "number" ? x.o : 1,
             v: typeof x.v === "boolean" ? x.v : true,
             r: typeof x.r === "number" ? x.r : 0.5,
             m: typeof x.m === "number" ? x.m : 0.5,
-            vc: !!x.vc,
-            km: !!x.km,
+            vc: !!x.vc, km: !!x.km,
           }))
           if (!Fs.length) throw new Error("Manifest je prázdný.")
           setFiles(Fs)
-
           const palette = ["#f5f5dc", "#8e8e8e", "#ffffff", "#ffd7a8", "#c0c0c0", "#e6f0ff", "#ffeedd"]
           setColors(Fs.map((f, i) => f.c || palette[i % palette.length]))
           setOpacities(Fs.map((f) => (typeof f.o === "number" ? clamp01(f.o) : 1)))
           setVisibles(Fs.map((f) => (typeof f.v === "boolean" ? f.v : true)))
           setRoughnesses(Fs.map((f) => (typeof f.r === "number" ? clamp01(f.r) : 0.5)))
           setMetalnesses(Fs.map((f) => (typeof f.m === "number" ? clamp01(f.m) : 0.5)))
-
           setTitle(typeof m?.title === "string" ? m.title : (getParam("title") ?? null))
-
           const logoUrl = m?.logo?.url || DEFAULT_LOGO
           setLogoCfg({
             url: logoUrl || null,
@@ -604,13 +573,11 @@ export default function ClientPage() {
             width: parseInt(getParam("logoWidth") ?? (window.innerWidth < 768 ? "120" : "160"), 10),
             pos: getParam("logoPos") || "bc",
           })
-
           const hl = m?.lights?.headlight
           setHeadlightCfg({
             enabled: typeof hl?.enabled === "boolean" ? hl.enabled : true,
             intensity: typeof hl?.intensity === "number" ? hl.intensity : 2.0,
           })
-
           setPhotos(Array.isArray(m?.photos) ? m.photos.filter(p => p && p.u) : [])
           return
         }
@@ -619,27 +586,21 @@ export default function ClientPage() {
         if (manifestUrlParam) {
           const m = await fetchJSON(manifestUrlParam)
           const Fs = (m?.files || []).map((x, i) => ({
-            url: x.u,
-            name: stripExt(x.n) || `Model ${i + 1}`,
-            rawName: x.n,
-            c: x.c,
-            o: typeof x.o === "number" ? x.o : 1,
+            url: x.u, name: stripExt(x.n) || `Model ${i + 1}`, rawName: x.n,
+            c: x.c, o: typeof x.o === "number" ? x.o : 1,
             v: typeof x.v === "boolean" ? x.v : true,
             r: typeof x.r === "number" ? x.r : 0.5,
             m: typeof x.m === "number" ? x.m : 0.5,
-            vc: !!x.vc,
-            km: !!x.km,
+            vc: !!x.vc, km: !!x.km,
           }))
           if (!Fs.length) throw new Error("Manifest je prázdný.")
           setFiles(Fs)
-
           const palette = ["#f5f5dc", "#8e8e8e", "#ffffff", "#ffd7a8", "#c0c0c0", "#e6f0ff", "#ffeedd"]
           setColors(Fs.map((f, i) => f.c || palette[i % palette.length]))
           setOpacities(Fs.map((f) => (typeof f.o === "number" ? clamp01(f.o) : 1)))
           setVisibles(Fs.map((f) => (typeof f.v === "boolean" ? f.v : true)))
           setRoughnesses(Fs.map((f) => (typeof f.r === "number" ? clamp01(f.r) : 0.5)))
           setMetalnesses(Fs.map((f) => (typeof f.m === "number" ? clamp01(f.m) : 0.5)))
-
           setTitle(typeof m?.title === "string" ? m.title : (getParam("title") ?? null))
           const logoUrl = m?.logo?.url || DEFAULT_LOGO
           setLogoCfg({
@@ -665,16 +626,12 @@ export default function ClientPage() {
           if (!arr) { try { arr = JSON.parse(decodeURIComponent(f)) } catch {} }
           if (!Array.isArray(arr)) throw new Error("Neplatný formát parametru ?files=")
           const Fs = arr.filter((x) => x && x.u).map((x, i) => ({
-            url: x.u,
-            name: stripExt(x.n) || `Model ${i + 1}`,
-            rawName: x.n,
-            c: x.c,
-            o: typeof x.o === "number" ? x.o : 1,
+            url: x.u, name: stripExt(x.n) || `Model ${i + 1}`, rawName: x.n,
+            c: x.c, o: typeof x.o === "number" ? clamp01(x.o) : 1,
             v: typeof x.v === "boolean" ? x.v : true,
-            r: typeof x.r === "number" ? x.r : 0.5,
-            m: typeof x.m === "number" ? x.m : 0.5,
-            vc: !!x.vc,
-            km: !!x.km,
+            r: typeof x.r === "number" ? clamp01(x.r) : 0.5,
+            m: typeof x.m === "number" ? clamp01(x.m) : 0.5,
+            vc: !!x.vc, km: !!x.km,
           }))
           setFiles(Fs)
           const palette = ["#f5f5dc", "#8e8e8e", "#ffffff", "#ffd7a8", "#c0c0c0", "#e6f0ff", "#ffeedd"]
@@ -715,7 +672,6 @@ export default function ClientPage() {
     })()
   }, [])
 
-  // LOGO
   const logoEl = logoCfg.url && (
     <img
       src={logoCfg.url}
@@ -739,7 +695,6 @@ export default function ClientPage() {
   const rootRef = useRef()
   const fillDim = headlightCfg.enabled ? 0.5 : 1
 
-  // SIDEBAR (stejný jako dřív – zkráceno)
   const sidebar = (
     <div
       className="sidebar"
@@ -755,14 +710,7 @@ export default function ClientPage() {
         maxHeight: "calc(100vh - 20px)", overflowY: "auto",
       }}
     >
-      <div
-        style={{
-          border: "1px solid rgba(255,255,255,.15)",
-          borderRadius: 10,
-          padding: 10,
-          background: "rgba(255,255,255,.06)",
-        }}
-      >
+      <div style={{ border: "1px solid rgba(255,255,255,.15)", borderRadius: 10, padding: 10, background: "rgba(255,255,255,.06)" }}>
         {fatal ? (
           <div style={{ color: "#ff8b8b" }}>{fatal}</div>
         ) : (
@@ -774,46 +722,16 @@ export default function ClientPage() {
             )}
 
             {files.map((f, i) => (
-              <div key={i} className="control-row" style={{
-                display: "grid", gridTemplateColumns: "36px 1fr 26px",
-                alignItems: "center", columnGap: 6, rowGap: 6, margin: "6px 0",
-              }}>
+              <div key={i} className="control-row" style={{ display: "grid", gridTemplateColumns: "36px 1fr 26px", alignItems: "center", columnGap: 6, rowGap: 6, margin: "6px 0" }}>
                 <div className="row-label" style={{ gridColumn: "1 / -1", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={f.rawName || f.name}>
                   {stripExt(f.name)}:
                 </div>
 
-                <input
-                  type="color"
-                  value={colors[i] ?? "#ffffff"}
-                  onChange={(e) => setColors((prev) => prev.map((v, idx) => (idx === i ? e.target.value : v)))}
-                  aria-label={`${f.name} color`}
-                  style={{ width: 36, height: 22, border: "1px solid #fff", borderRadius: 4, background: colors[i] ?? "#ffffff", padding: 0, cursor: "pointer" }}
-                />
+                <input type="color" value={colors[i] ?? "#ffffff"} onChange={(e) => setColors((prev) => prev.map((v, idx) => (idx === i ? e.target.value : v)))} aria-label={`${f.name} color`} style={{ width: 36, height: 22, border: "1px solid #fff", borderRadius: 4, background: colors[i] ?? "#ffffff", padding: 0, cursor: "pointer" }} />
 
-                <input
-                  className="slider"
-                  type="range"
-                  min={0} max={1} step={0.01}
-                  value={opacities[i] ?? 1}
-                  onChange={(e) => {
-                    const v = parseFloat(e.target.value)
-                    setOpacities((prev) => prev.map((x, idx) => (idx === i ? v : x)))
-                  }}
-                  style={{ width: "calc(100% - 18px)", minWidth: 140 }}
-                  aria-label={`${f.name} opacity`}
-                />
+                <input className="slider" type="range" min={0} max={1} step={0.01} value={opacities[i] ?? 1} onChange={(e) => { const v = parseFloat(e.target.value); setOpacities((prev) => prev.map((x, idx) => (idx === i ? v : x))) }} style={{ width: "calc(100% - 18px)", minWidth: 140 }} aria-label={`${f.name} opacity`} />
 
-                <button
-                  className={`toggle icon-btn ${visibles[i] ? "is-on" : "is-off"}`}
-                  onClick={() => setVisibles((prev) => prev.map((v, idx) => (idx === i ? !v : v)))}
-                  aria-label={visibles[i] ? `Hide ${f.name}` : `Show ${f.name}`}
-                  style={{
-                    position: "relative", width: 26, height: 22, padding: 0,
-                    display: "inline-flex", alignItems: "center", justifyContent: "center",
-                    overflow: "hidden", background: "transparent",
-                    border: "1px solid white", borderRadius: 6, color: "white", cursor: "pointer",
-                  }}
-                >
+                <button className={`toggle icon-btn ${visibles[i] ? "is-on" : "is-off"}`} onClick={() => setVisibles((prev) => prev.map((v, idx) => (idx === i ? !v : v)))} aria-label={visibles[i] ? `Hide ${f.name}` : `Show ${f.name}`} style={{ position: "relative", width: 26, height: 22, padding: 0, display: "inline-flex", alignItems: "center", justifyContent: "center", overflow: "hidden", background: "transparent", border: "1px solid white", borderRadius: 6, color: "white", cursor: "pointer" }}>
                   <span style={{ fontSize: 12 }}>{visibles[i] ? "👁️" : "🚫"}</span>
                 </button>
               </div>
@@ -829,39 +747,11 @@ export default function ClientPage() {
       {/* Fotky */}
       {photos && photos.length > 0 && (
         <div style={{ marginTop: 10 }}>
-          <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 8, opacity: 0.9 }}>
-            Fotky ({photos.length})
-          </div>
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(auto-fill, minmax(72px, 1fr))",
-              gap: 8,
-              border: "1px solid rgba(255,255,255,.15)",
-              borderRadius: 10,
-              background: "rgba(255,255,255,.06)",
-              padding: 8,
-            }}
-          >
+          <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 8, opacity: 0.9 }}>Fotky ({photos.length})</div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(72px, 1fr))", gap: 8, border: "1px solid rgba(255,255,255,.15)", borderRadius: 10, background: "rgba(255,255,255,.06)", padding: 8 }}>
             {photos.map((p, i) => (
-              <button
-                key={i}
-                onClick={() => setLightbox({ open: true, src: p.u, alt: p.n || `Photo ${i+1}` })}
-                style={{
-                  padding: 0, margin: 0, border: "none",
-                  background: "transparent", cursor: "pointer",
-                  borderRadius: 8, overflow: "hidden",
-                  boxShadow: "0 1px 6px rgba(0,0,0,.35)",
-                  border: "1px solid rgba(255,255,255,.12)"
-                }}
-                title={p.n || ""}
-              >
-                <img
-                  src={p.u}
-                  alt={p.n || ""}
-                  loading="lazy"
-                  style={{ display: "block", width: "100%", height: 72, objectFit: "cover" }}
-                />
+              <button key={i} onClick={() => setLightbox({ open: true, src: p.u, alt: p.n || `Photo ${i+1}` })} style={{ padding: 0, margin: 0, border: "none", background: "transparent", cursor: "pointer", borderRadius: 8, overflow: "hidden", boxShadow: "0 1px 6px rgba(0,0,0,.35)", border: "1px solid rgba(255,255,255,.12)" }} title={p.n || ""}>
+                <img src={p.u} alt={p.n || ""} loading="lazy" style={{ display: "block", width: "100%", height: 72, objectFit: "cover" }} />
               </button>
             ))}
           </div>
@@ -875,13 +765,7 @@ export default function ClientPage() {
       {logoEl}
       {sidebar}
 
-      <Canvas
-        orthographic
-        camera={{ position: [0, 0, 100], near: 0.01, far: 100000 }}
-        gl={{ alpha: true }}
-        onCreated={({ gl }) => gl.setClearAlpha(0)}
-        style={{ position: "absolute", inset: 0, zIndex: 1, background: "transparent" }}
-      >
+      <Canvas orthographic camera={{ position: [0, 0, 100], near: 0.01, far: 100000 }} gl={{ alpha: true }} onCreated={({ gl }) => gl.setClearAlpha(0)} style={{ position: "absolute", inset: 0, zIndex: 1, background: "transparent" }}>
         {!fatal && (
           <>
             <ambientLight intensity={lightIntensity * 0.4 * (headlightCfg.enabled ? 0.5 : 1)} />
@@ -948,4 +832,3 @@ export default function ClientPage() {
     </div>
   )
 }
-
