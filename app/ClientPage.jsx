@@ -131,7 +131,7 @@ function AnyModel({
       ...opts,
     })
 
-  // Načtení modelu – jen podle URL/přípony (nezávislé na autoSmooth!)
+  // Načítání modelu (nezávislé na autoSmooth)
   useEffect(() => {
     let cancelled = false
     setLoading(true)
@@ -191,9 +191,9 @@ function AnyModel({
       }
     })()
     return () => { cancelled = true }
-  }, [url, ext]) // <- jen url & ext
+  }, [url, ext])
 
-  // Re-aplikace smoothingu bez reloadu (neovlivní kameru)
+  // Re-aplikace smoothingu (není reload, neresetuje kameru)
   useEffect(() => {
     if (!object3D) return
     object3D.traverse((child) => {
@@ -211,7 +211,7 @@ function AnyModel({
     })
   }, [object3D, autoSmooth])
 
-  // Aplikace materiálů při změně vzhledu
+  // Materiály při změně vzhledu
   useEffect(() => {
     if (!object3D) return
     object3D.traverse((child) => {
@@ -254,20 +254,22 @@ function Headlight({ enabled = true, intensity = 2, color = "#ffffff" }) {
 
 /* ---------- Trackball ---------- */
 function TouchTrackballControls({ target = [0, 0, 0] }) {
-  const { camera, gl } = useThree()
+  const { camera, gl, size } = useThree()
   const controlsRef = useRef(null)
 
   useEffect(() => {
     const controls = new TrackballControls(camera, gl.domElement)
     controls.rotateSpeed = 5.0
     controls.zoomSpeed = 1.2
-    controls.panSpeed = 1.0
+    controls.panSpeed = 0.6     // počáteční
     controls.staticMoving = true
     controlsRef.current = controls
+
     const ts = (e) => { e.preventDefault(); controls.handleTouchStart(e) }
     const tm = (e) => { e.preventDefault(); controls.handleTouchMove(e) }
     gl.domElement.addEventListener("touchstart", ts, { passive: false })
     gl.domElement.addEventListener("touchmove", tm, { passive: false })
+
     return () => {
       gl.domElement.removeEventListener("touchstart", ts)
       gl.domElement.removeEventListener("touchmove", tm)
@@ -275,16 +277,27 @@ function TouchTrackballControls({ target = [0, 0, 0] }) {
     }
   }, [camera, gl])
 
+  // update target
   useEffect(() => {
     if (!controlsRef.current) return
     controlsRef.current.target.set(target[0], target[1], target[2])
     controlsRef.current.update()
   }, [target])
 
+  // *DŮLEŽITÉ*: po resize zavolej handleResize a uprav panSpeed podle zoomu
+  useEffect(() => {
+    const c = controlsRef.current
+    if (!c) return
+    c.handleResize()
+  }, [size.width, size.height])
+
   useFrame(() => {
-    if (!controlsRef.current) return
-    if (camera.isOrthographicCamera) controlsRef.current.panSpeed = camera.zoom * 0.4
-    controlsRef.current.update()
+    const c = controlsRef.current
+    if (!c) return
+    // stabilní pan napříč zoomy/velikostmi
+    const z = Math.max(camera.zoom || 1, 0.0001)
+    c.panSpeed = 0.6 / z           // větší zoom => jemnější pan; malý zoom => rychlejší
+    c.update()
   })
 
   return null
@@ -297,6 +310,7 @@ function AutoCenterAndFrame({
   centerMode = "combined",
 }) {
   const { camera, size } = useThree()
+
   useEffect(() => {
     const root = rootRef.current
     if (!root) return
@@ -328,6 +342,7 @@ function AutoCenterAndFrame({
       setTarget([centerAll.x, centerAll.y, centerAll.z])
     }
 
+    // Recompute after centering
     const after = new THREE.Box3().setFromObject(root)
     const dims2 = new THREE.Vector3()
     const ctr = new THREE.Vector3()
@@ -341,10 +356,14 @@ function AutoCenterAndFrame({
     let newZoom = Math.min(zoomX, zoomY)
     newZoom *= isMobile ? mobileScale : desktopScale
 
-    camera.near = 0.01
-    camera.far = 100000
+    // *** FIX CLIPPINGU ***
+    // nastav near/far podle hloubky objektu (bezpečný buffer)
+    const depth = Math.max(dims2.z, Math.max(dims2.x, dims2.y) * 0.75) || 1
+    const safeDist = depth * 4
+    camera.near = Math.max(0.01, safeDist * 0.001)
+    camera.far = safeDist * 50 + 100
+    camera.position.set(ctr.x, ctr.y, ctr.z + safeDist) // bezpečně před scénou
     camera.zoom = Math.max(newZoom, 0.01)
-    camera.position.set(ctr.x, ctr.y, ctr.z + Math.abs(camera.position.z))
     camera.updateProjectionMatrix()
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [depsKey, size.width, size.height, isMobile, desktopScale, mobileScale, margin, centerMode])
@@ -389,10 +408,9 @@ function Switch({ checked, onChange, label }) {
     }
   }
 
-  // rozměry na jednom místě
   const TRACK_W = 38
   const TRACK_H = 22
-  const KNOB = 18 // menší než výška -> hezké vnitřní okraje
+  const KNOB = 18
 
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -423,7 +441,7 @@ function Switch({ checked, onChange, label }) {
             position: "absolute",
             top: "50%",
             transform: "translateY(-50%)",
-            left: checked ? TRACK_W - KNOB - 3 : 3, // 3px ≈ 2px okraj + 1px border
+            left: checked ? TRACK_W - KNOB - 3 : 3,
             width: KNOB,
             height: KNOB,
             borderRadius: "50%",
@@ -453,7 +471,7 @@ export default function ClientPage() {
   const [title, setTitle] = useState(null)
 
   // modely
-  const [files, setFiles] = useState([]) // {url,name,rawName,c,o,v,r,m,vc,km}
+  const [files, setFiles] = useState([])
   const [colors, setColors] = useState([])
   const [opacities, setOpacities] = useState([])
   const [visibles, setVisibles] = useState([])
@@ -466,8 +484,8 @@ export default function ClientPage() {
 
   const [logoCfg, setLogoCfg] = useState({ url: DEFAULT_LOGO, opacity: 0.9, width: 160, pos: "bc" })
 
-  // fotky (z manifestu)
-  const [photos, setPhotos] = useState([]) // {n,u,w,h}
+  // fotky
+  const [photos, setPhotos] = useState([])
   const [photosOpenMobile, setPhotosOpenMobile] = useState(false)
   const [lightbox, setLightbox] = useState({ open: false, src: null, alt: "" })
 
@@ -475,7 +493,6 @@ export default function ClientPage() {
   const [cameraTarget, setCameraTarget] = useState([0, 0, 0])
   const [loadedCount, setLoadedCount] = useState(0)
   const handleModelLoaded = () => setLoadedCount((n) => n + 1)
-
   const centerParam = (getParam("center") || "combined").toLowerCase()
   const centerMode = ["per", "combined", "none"].includes(centerParam) ? centerParam : "combined"
 
@@ -614,13 +631,7 @@ export default function ClientPage() {
             width: parseInt(getParam("logoWidth") ?? (window.innerWidth < 768 ? "120" : "160"), 10),
             pos: getParam("logoPos") || "bc",
           })
-          const qOn = getParam("headlight")
-          const qI = parseFloat(getParam("headlightI") ?? "NaN")
-          setHeadlightCfg({
-            enabled: qOn == null ? true : qOn !== "0",
-            intensity: isFinite(qI) ? qI : 2.0,
-          })
-          setPhotos([]) // u ?files= nepřenášíme fotky
+          setPhotos([])
           return
         }
 
@@ -669,7 +680,7 @@ export default function ClientPage() {
   const rootRef = useRef()
   const fillDim = headlightCfg.enabled ? 0.5 : 1
 
-  // SIDEBAR vlevo (ovládání + fotky pod ním; fotky wrapují výškou podle obsahu)
+  // SIDEBAR
   const sidebar = (
     <div
       className="sidebar"
@@ -711,12 +722,10 @@ export default function ClientPage() {
                 display: "grid", gridTemplateColumns: "36px 1fr 26px",
                 alignItems: "center", columnGap: 6, rowGap: 6, margin: "6px 0",
               }}>
-                {/* Label */}
                 <div className="row-label" style={{ gridColumn: "1 / -1", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={f.rawName || f.name}>
                   {stripExt(f.name)}:
                 </div>
 
-                {/* Barva */}
                 <input
                   type="color"
                   value={colors[i] ?? "#ffffff"}
@@ -725,7 +734,6 @@ export default function ClientPage() {
                   style={{ width: 36, height: 22, border: "1px solid #fff", borderRadius: 4, background: colors[i] ?? "#ffffff", padding: 0, cursor: "pointer" }}
                 />
 
-                {/* Opacity */}
                 <input
                   className="slider"
                   type="range"
@@ -739,7 +747,6 @@ export default function ClientPage() {
                   aria-label={`${f.name} opacity`}
                 />
 
-                {/* Viditelnost */}
                 <button
                   className={`toggle icon-btn ${visibles[i] ? "is-on" : "is-off"}`}
                   onClick={() => setVisibles((prev) => prev.map((v, idx) => (idx === i ? !v : v)))}
@@ -756,7 +763,6 @@ export default function ClientPage() {
               </div>
             ))}
 
-            {/* AutoSmooth – SLIM switch */}
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 10 }}>
               <Switch
                 checked={autoSmooth}
@@ -768,10 +774,9 @@ export default function ClientPage() {
         )}
       </div>
 
-      {/* Fotky – pod ovládáním, výška podle obsahu (wrap) */}
+      {/* Fotky */}
       {photos && photos.length > 0 && (
         <div style={{ marginTop: 10 }}>
-          {/* Desktop titulek / Mobil tlačítko */}
           {!isMobile ? (
             <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 8, opacity: 0.9 }}>
               Fotky ({photos.length})
@@ -790,7 +795,6 @@ export default function ClientPage() {
             </button>
           )}
 
-          {/* Grid s wrapem (desktop vždy viditelný, mobil dle collapsu) */}
           {(!isMobile || photosOpenMobile) && (
             <div
               style={{
@@ -836,7 +840,6 @@ export default function ClientPage() {
       {logoEl}
       {sidebar}
 
-      {/* CANVAS */}
       <Canvas
         orthographic
         camera={{ position: [0, 0, 100], near: 0.01, far: 100000 }}
@@ -889,10 +892,8 @@ export default function ClientPage() {
         )}
       </Canvas>
 
-      {/* Lightbox */}
       <Lightbox open={lightbox.open} onClose={() => setLightbox({ open: false, src: null, alt: "" })} src={lightbox.src} alt={lightbox.alt} />
 
-      {/* Globální styly */}
       <style jsx global>{`
         .slider { appearance: none; height: 14px; background: transparent; margin: 5px 0; display: inline-block; }
         .slider::-webkit-slider-runnable-track { height: 4px; background: white; border-radius: 2px; }
