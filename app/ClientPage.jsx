@@ -131,7 +131,7 @@ function AnyModel({
       ...opts,
     })
 
-  // 1) Načtení modelu – závisí pouze na URL a příponě (NE na autoSmooth!)
+  // Načtení modelu – jen podle URL/přípony (nezávislé na autoSmooth!)
   useEffect(() => {
     let cancelled = false
     setLoading(true)
@@ -183,7 +183,7 @@ function AnyModel({
         if (!cancelled) {
           setObject3D(obj)
           setLoading(false)
-          onLoaded && onLoaded(obj) // zavoláme jen jednou při loadu
+          onLoaded && onLoaded(obj)
         }
       } catch (e) {
         if (!cancelled) setLoading(false)
@@ -191,9 +191,9 @@ function AnyModel({
       }
     })()
     return () => { cancelled = true }
-  }, [url, ext]) // <- jen url a ext!
+  }, [url, ext]) // <- jen url & ext
 
-  // 2) Re-aplikace smoothingu bez reloadu a bez změny loadedCount/kamery
+  // Re-aplikace smoothingu bez reloadu (neovlivní kameru)
   useEffect(() => {
     if (!object3D) return
     object3D.traverse((child) => {
@@ -202,10 +202,7 @@ function AnyModel({
       const base = child.userData._baseGeom
       let newGeom = base
       if (autoSmooth) newGeom = autoSmoothGeometry(base, DEFAULT_SMOOTH_ANGLE)
-      else {
-        newGeom = base.clone()
-        newGeom.computeVertexNormals()
-      }
+      else { newGeom = base.clone(); newGeom.computeVertexNormals() }
       if (child.userData._derivedGeom && child.userData._derivedGeom !== base) {
         child.userData._derivedGeom.dispose()
       }
@@ -214,7 +211,7 @@ function AnyModel({
     })
   }, [object3D, autoSmooth])
 
-  // 3) Aplikace materiálů při změně vzhledu (bez reloadu)
+  // Aplikace materiálů při změně vzhledu
   useEffect(() => {
     if (!object3D) return
     object3D.traverse((child) => {
@@ -383,7 +380,7 @@ function Lightbox({ open, onClose, src, alt }) {
   )
 }
 
-/* ---------- Switch (AutoSmooth) ---------- */
+/* ---------- Slim Switch (AutoSmooth) ---------- */
 function Switch({ checked, onChange, label }) {
   const handleKey = (e) => {
     if (e.key === "Enter" || e.key === " ") {
@@ -392,7 +389,7 @@ function Switch({ checked, onChange, label }) {
     }
   }
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
       {label && <span style={{ opacity: 0.85 }}>{label}</span>}
       <button
         type="button"
@@ -402,12 +399,14 @@ function Switch({ checked, onChange, label }) {
         onKeyDown={handleKey}
         style={{
           position: "relative",
-          width: 46, height: 26,
+          width: 38,
+          height: 22,
           borderRadius: 999,
-          border: "1px solid rgba(255,255,255,.25)",
-          background: checked ? "rgba(59,130,246,.5)" : "rgba(255,255,255,.12)",
+          border: "1px solid rgba(255,255,255,.22)",
+          background: checked ? "rgba(59,130,246,.45)" : "rgba(255,255,255,.10)",
           cursor: "pointer",
           transition: "background .15s ease, border-color .15s ease",
+          outline: "none",
         }}
         title={checked ? "Vypnout Auto smooth" : "Zapnout Auto smooth"}
       >
@@ -415,11 +414,13 @@ function Switch({ checked, onChange, label }) {
           aria-hidden
           style={{
             position: "absolute",
-            top: 2, left: checked ? 22 : 2,
-            width: 22, height: 22,
+            top: 1.5,
+            left: checked ? 19 : 1.5,
+            width: 19,
+            height: 19,
             borderRadius: "50%",
             background: "#fff",
-            boxShadow: "0 1px 4px rgba(0,0,0,.35)",
+            boxShadow: "0 1px 3px rgba(0,0,0,.35)",
             transition: "left .15s ease",
           }}
         />
@@ -747,12 +748,12 @@ export default function ClientPage() {
               </div>
             ))}
 
-            {/* AutoSmooth – switch */}
+            {/* AutoSmooth – SLIM switch */}
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 10 }}>
               <Switch
                 checked={autoSmooth}
                 onChange={setAutoSmooth}
-                label="Auto smooth (30°)"
+                label="Auto smooth"
               />
             </div>
           </>
@@ -837,11 +838,11 @@ export default function ClientPage() {
       >
         {!fatal && (
           <>
-            <ambientLight intensity={lightIntensity * 0.4 * fillDim} />
-            <directionalLight position={[0, 5, 5]} intensity={lightIntensity * 1.5 * fillDim} />
-            <directionalLight position={[-10, 0, 0]} intensity={lightIntensity * 1.0 * fillDim} />
-            <directionalLight position={[10, 0, 0]} intensity={lightIntensity * 1.2 * fillDim} />
-            <directionalLight position={[0, -5, -5]} intensity={lightIntensity * 0.8 * fillDim} />
+            <ambientLight intensity={lightIntensity * 0.4 * (headlightCfg.enabled ? 0.5 : 1)} />
+            <directionalLight position={[0, 5, 5]} intensity={lightIntensity * 1.5 * (headlightCfg.enabled ? 0.5 : 1)} />
+            <directionalLight position={[-10, 0, 0]} intensity={lightIntensity * 1.0 * (headlightCfg.enabled ? 0.5 : 1)} />
+            <directionalLight position={[10, 0, 0]} intensity={lightIntensity * 1.2 * (headlightCfg.enabled ? 0.5 : 1)} />
+            <directionalLight position={[0, -5, -5]} intensity={lightIntensity * 0.8 * (headlightCfg.enabled ? 0.5 : 1)} />
             <Headlight enabled={headlightCfg.enabled} intensity={headlightCfg.intensity} />
 
             <group ref={rootRef}>
@@ -854,7 +855,7 @@ export default function ClientPage() {
                     color={colors[i] ?? "#ffffff"}
                     opacity={opacities[i] ?? 1}
                     visible={visibles[i] ?? true}
-                    onLoaded={() => setLoadedCount((n) => n + 1)}
+                    onLoaded={handleModelLoaded}
                     autoSmooth={autoSmooth}
                     roughness={roughnesses[i] ?? (typeof f.r === "number" ? f.r : 0.5)}
                     metalness={metalnesses[i] ?? (typeof f.m === "number" ? f.m : 0.5)}
