@@ -131,6 +131,7 @@ function AnyModel({
       ...opts,
     })
 
+  // 1) Načtení modelu – závisí pouze na URL a příponě (NE na autoSmooth!)
   useEffect(() => {
     let cancelled = false
     setLoading(true)
@@ -182,7 +183,7 @@ function AnyModel({
         if (!cancelled) {
           setObject3D(obj)
           setLoading(false)
-          onLoaded && onLoaded(obj)
+          onLoaded && onLoaded(obj) // zavoláme jen jednou při loadu
         }
       } catch (e) {
         if (!cancelled) setLoading(false)
@@ -190,9 +191,9 @@ function AnyModel({
       }
     })()
     return () => { cancelled = true }
-  }, [url, ext, autoSmooth, opacity, color, roughness, metalness, useVertexColors, keepMaterials])
+  }, [url, ext]) // <- jen url a ext!
 
-  // Re-aplikace autoSmooth při změně toggle
+  // 2) Re-aplikace smoothingu bez reloadu a bez změny loadedCount/kamery
   useEffect(() => {
     if (!object3D) return
     object3D.traverse((child) => {
@@ -213,7 +214,7 @@ function AnyModel({
     })
   }, [object3D, autoSmooth])
 
-  // Materiál a vzhled – respektuje VC/keepMaterials
+  // 3) Aplikace materiálů při změně vzhledu (bez reloadu)
   useEffect(() => {
     if (!object3D) return
     object3D.traverse((child) => {
@@ -382,13 +383,55 @@ function Lightbox({ open, onClose, src, alt }) {
   )
 }
 
+/* ---------- Switch (AutoSmooth) ---------- */
+function Switch({ checked, onChange, label }) {
+  const handleKey = (e) => {
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault()
+      onChange(!checked)
+    }
+  }
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+      {label && <span style={{ opacity: 0.85 }}>{label}</span>}
+      <button
+        type="button"
+        role="switch"
+        aria-checked={checked}
+        onClick={() => onChange(!checked)}
+        onKeyDown={handleKey}
+        style={{
+          position: "relative",
+          width: 46, height: 26,
+          borderRadius: 999,
+          border: "1px solid rgba(255,255,255,.25)",
+          background: checked ? "rgba(59,130,246,.5)" : "rgba(255,255,255,.12)",
+          cursor: "pointer",
+          transition: "background .15s ease, border-color .15s ease",
+        }}
+        title={checked ? "Vypnout Auto smooth" : "Zapnout Auto smooth"}
+      >
+        <span
+          aria-hidden
+          style={{
+            position: "absolute",
+            top: 2, left: checked ? 22 : 2,
+            width: 22, height: 22,
+            borderRadius: "50%",
+            background: "#fff",
+            boxShadow: "0 1px 4px rgba(0,0,0,.35)",
+            transition: "left .15s ease",
+          }}
+        />
+      </button>
+    </div>
+  )
+}
+
 /* ---------- Hlavní komponenta ---------- */
 export default function ClientPage() {
   const [lightIntensity] = useState(1)
   const [headlightCfg, setHeadlightCfg] = useState({ enabled: true, intensity: 2.0 })
-
-  const [uiReady, setUiReady] = useState(false)
-  useEffect(() => { const id = requestAnimationFrame(() => setUiReady(true)); return () => cancelAnimationFrame(id) }, [])
 
   const [isMobile, setIsMobile] = useState(false)
   useEffect(() => {
@@ -409,7 +452,7 @@ export default function ClientPage() {
   const [metalnesses, setMetalnesses] = useState([])
   const [fatal, setFatal] = useState(null)
 
-  // Auto smooth (jen toggle)
+  // Auto smooth (switch)
   const [autoSmooth, setAutoSmooth] = useState((getParam("smooth") ?? "1") !== "0")
 
   const [logoCfg, setLogoCfg] = useState({ url: DEFAULT_LOGO, opacity: 0.9, width: 160, pos: "bc" })
@@ -419,7 +462,7 @@ export default function ClientPage() {
   const [photosOpenMobile, setPhotosOpenMobile] = useState(false)
   const [lightbox, setLightbox] = useState({ open: false, src: null, alt: "" })
 
-  // camera targeting
+  // kamera
   const [cameraTarget, setCameraTarget] = useState([0, 0, 0])
   const [loadedCount, setLoadedCount] = useState(0)
   const handleModelLoaded = () => setLoadedCount((n) => n + 1)
@@ -431,7 +474,6 @@ export default function ClientPage() {
   useEffect(() => {
     ;(async () => {
       try {
-        // Priorita: ?m=  →  ?manifest=  →  ?files=
         const mId = getParam("m")
         if (mId) {
           const manifestUrl = `${SUPABASE_URL}/storage/v1/object/public/${PUBLIC_BUCKET}/manifests/${encodeURIComponent(mId)}.json`
@@ -484,7 +526,6 @@ export default function ClientPage() {
             })
           }
 
-          // photos z manifestu
           setPhotos(Array.isArray(m?.photos) ? m.photos.filter(p => p && p.u) : [])
           return
         }
@@ -619,7 +660,7 @@ export default function ClientPage() {
   const rootRef = useRef()
   const fillDim = headlightCfg.enabled ? 0.5 : 1
 
-  // SIDEBAR vlevo (ovládání + fotky pod ním)
+  // SIDEBAR vlevo (ovládání + fotky pod ním; fotky wrapují výškou podle obsahu)
   const sidebar = (
     <div
       className="sidebar"
@@ -706,19 +747,19 @@ export default function ClientPage() {
               </div>
             ))}
 
-            {/* AutoSmooth – jen toggle */}
-            <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 6, justifyContent: "space-between" }}>
-              <span style={{ opacity: 0.8 }}>Auto smooth (30°)</span>
-              <label style={{ display: "inline-flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
-                <input type="checkbox" checked={autoSmooth} onChange={(e) => setAutoSmooth(e.target.checked)} />
-                <span>{autoSmooth ? "Zapnuto" : "Vypnuto"}</span>
-              </label>
+            {/* AutoSmooth – switch */}
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 10 }}>
+              <Switch
+                checked={autoSmooth}
+                onChange={setAutoSmooth}
+                label="Auto smooth (30°)"
+              />
             </div>
           </>
         )}
       </div>
 
-      {/* Fotky – pod ovládáním, výška podle obsahu */}
+      {/* Fotky – pod ovládáním, výška podle obsahu (wrap) */}
       {photos && photos.length > 0 && (
         <div style={{ marginTop: 10 }}>
           {/* Desktop titulek / Mobil tlačítko */}
@@ -813,7 +854,7 @@ export default function ClientPage() {
                     color={colors[i] ?? "#ffffff"}
                     opacity={opacities[i] ?? 1}
                     visible={visibles[i] ?? true}
-                    onLoaded={handleModelLoaded}
+                    onLoaded={() => setLoadedCount((n) => n + 1)}
                     autoSmooth={autoSmooth}
                     roughness={roughnesses[i] ?? (typeof f.r === "number" ? f.r : 0.5)}
                     metalness={metalnesses[i] ?? (typeof f.m === "number" ? f.m : 0.5)}
