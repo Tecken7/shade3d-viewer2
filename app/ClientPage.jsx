@@ -260,7 +260,7 @@ function TouchTrackballControls({ target = [0, 0, 0] }) {
     const controls = new TrackballControls(camera, gl.domElement)
     controls.rotateSpeed = 5.0
     controls.zoomSpeed = 1.2
-    controls.panSpeed = 0.0            // vypneme interní pan
+    controls.panSpeed = 0.0            // pan vypneme – řešíme sami
     controls.staticMoving = true
     controls.dynamicDampingFactor = 0.12
     controls.mouseButtons = {
@@ -300,16 +300,19 @@ function TouchTrackballControls({ target = [0, 0, 0] }) {
   return null
 }
 
-/* ---------- Vlastní pan (pravé tlačítko) – pixel-přesný a mírnější ---------- */
+/* ---------- Vlastní pan (pravé tlačítko) – screen-space, 1:1 s pixely ---------- */
 function RightButtonPan({ setTarget }) {
   const { camera, gl, size } = useThree()
   const isPanning = useRef(false)
   const last = useRef({ x: 0, y: 0 })
   const pointerIdRef = useRef(null)
 
-  // Citlivost panu: 1.0 = 1:1 pixel → světová jednotka dle frustumu
-  // Snížili jsme ~4×.
+  // Jemné doladění – 1.0 = přesně 1px → 1px ve světě podle frustumu
   const PAN_SENSITIVITY = 0.25
+
+  const right = new THREE.Vector3()
+  const up = new THREE.Vector3()
+  const deltaWorld = new THREE.Vector3()
 
   useEffect(() => {
     const el = gl.domElement
@@ -332,25 +335,28 @@ function RightButtonPan({ setTarget }) {
       const dy = e.clientY - last.current.y
       last.current = { x: e.clientX, y: e.clientY }
 
+      // camera-space axes → world
+      right.setFromMatrixColumn(camera.matrixWorld, 0).normalize()
+      up.setFromMatrixColumn(camera.matrixWorld, 1).normalize()
+
       if (camera.isOrthographicCamera) {
-        const wppX = (camera.right - camera.left) / size.width
-        const wppY = (camera.top - camera.bottom) / size.height
+        // světové jednotky na pixel, se započtením ZOOMU
+        const wppX = ((camera.right - camera.left) / (size.width * camera.zoom))
+        const wppY = ((camera.top - camera.bottom) / (size.height * camera.zoom))
+        const moveRight = -dx * wppX * PAN_SENSITIVITY
+        const moveUp    =  dy * wppY * PAN_SENSITIVITY
 
-        const moveX = -dx * wppX * PAN_SENSITIVITY
-        const moveY =  dy * wppY * PAN_SENSITIVITY
-
-        camera.position.x += moveX
-        camera.position.y += moveY
+        deltaWorld.copy(right).multiplyScalar(moveRight).addScaledVector(up, moveUp)
+        camera.position.add(deltaWorld)
+        setTarget?.((t) => [t[0] + deltaWorld.x, t[1] + deltaWorld.y, t[2] + deltaWorld.z])
         camera.updateProjectionMatrix()
-        setTarget?.((t) => [t[0] + moveX, t[1] + moveY, t[2]])
       } else {
-        const distance = camera.position.length()
-        const scale = (distance / Math.max(size.width, size.height)) * PAN_SENSITIVITY
-        const moveX = -dx * scale
-        const moveY =  dy * scale
-        camera.position.x += moveX
-        camera.position.y += moveY
-        setTarget?.((t) => [t[0] + moveX, t[1] + moveY, t[2]])
+        // fallback pro perspektivu (tady stejně nejedeme)
+        const dist = camera.position.length()
+        const scale = (dist / Math.max(size.width, size.height)) * PAN_SENSITIVITY
+        deltaWorld.copy(right).multiplyScalar(-dx * scale).addScaledVector(up, dy * scale)
+        camera.position.add(deltaWorld)
+        setTarget?.((t) => [t[0] + deltaWorld.x, t[1] + deltaWorld.y, t[2] + deltaWorld.z])
       }
     }
 
@@ -479,7 +485,6 @@ function Switch({ checked, onChange, label }) {
     }
   }
   const TRACK_W = 38, TRACK_H = 22, KNOB = 18
-
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
       {label && <span style={{ opacity: 0.85 }}>{label}</span>}
@@ -734,7 +739,7 @@ export default function ClientPage() {
   const rootRef = useRef()
   const fillDim = headlightCfg.enabled ? 0.5 : 1
 
-  // SIDEBAR
+  // SIDEBAR (stejný jako dřív – zkráceno)
   const sidebar = (
     <div
       className="sidebar"
@@ -750,7 +755,6 @@ export default function ClientPage() {
         maxHeight: "calc(100vh - 20px)", overflowY: "auto",
       }}
     >
-      {/* Ovládání */}
       <div
         style={{
           border: "1px solid rgba(255,255,255,.15)",
@@ -825,59 +829,42 @@ export default function ClientPage() {
       {/* Fotky */}
       {photos && photos.length > 0 && (
         <div style={{ marginTop: 10 }}>
-          {!isMobile ? (
-            <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 8, opacity: 0.9 }}>
-              Fotky ({photos.length})
-            </div>
-          ) : (
-            <button
-              onClick={() => setPhotosOpenMobile(v => !v)}
-              style={{
-                width: "100%",
-                background: "rgba(0,0,0,.45)", color: "white",
-                border: "1px solid rgba(255,255,255,.2)", borderRadius: 10,
-                padding: "8px 12px", fontSize: 14, fontWeight: 600
-              }}
-            >
-              Fotky ({photos.length}) {photosOpenMobile ? "▴" : "▾"}
-            </button>
-          )}
-
-          {(!isMobile || photosOpenMobile) && (
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(auto-fill, minmax(72px, 1fr))",
-                gap: 8,
-                border: "1px solid rgba(255,255,255,.15)",
-                borderRadius: 10,
-                background: "rgba(255,255,255,.06)",
-                padding: 8,
-              }}
-            >
-              {photos.map((p, i) => (
-                <button
-                  key={i}
-                  onClick={() => setLightbox({ open: true, src: p.u, alt: p.n || `Photo ${i+1}` })}
-                  style={{
-                    padding: 0, margin: 0, border: "none",
-                    background: "transparent", cursor: "pointer",
-                    borderRadius: 8, overflow: "hidden",
-                    boxShadow: "0 1px 6px rgba(0,0,0,.35)",
-                    border: "1px solid rgba(255,255,255,.12)"
-                  }}
-                  title={p.n || ""}
-                >
-                  <img
-                    src={p.u}
-                    alt={p.n || ""}
-                    loading="lazy"
-                    style={{ display: "block", width: "100%", height: 72, objectFit: "cover" }}
-                  />
-                </button>
-              ))}
-            </div>
-          )}
+          <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 8, opacity: 0.9 }}>
+            Fotky ({photos.length})
+          </div>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fill, minmax(72px, 1fr))",
+              gap: 8,
+              border: "1px solid rgba(255,255,255,.15)",
+              borderRadius: 10,
+              background: "rgba(255,255,255,.06)",
+              padding: 8,
+            }}
+          >
+            {photos.map((p, i) => (
+              <button
+                key={i}
+                onClick={() => setLightbox({ open: true, src: p.u, alt: p.n || `Photo ${i+1}` })}
+                style={{
+                  padding: 0, margin: 0, border: "none",
+                  background: "transparent", cursor: "pointer",
+                  borderRadius: 8, overflow: "hidden",
+                  boxShadow: "0 1px 6px rgba(0,0,0,.35)",
+                  border: "1px solid rgba(255,255,255,.12)"
+                }}
+                title={p.n || ""}
+              >
+                <img
+                  src={p.u}
+                  alt={p.n || ""}
+                  loading="lazy"
+                  style={{ display: "block", width: "100%", height: 72, objectFit: "cover" }}
+                />
+              </button>
+            ))}
+          </div>
         </div>
       )}
     </div>
@@ -933,7 +920,7 @@ export default function ClientPage() {
               isMobile={isMobile}
               desktopScale={0.4}
               mobileScale={1.0}
-              centerMode={centerMode}
+              centerMode={"combined"}
             />
             <TouchTrackballControls target={cameraTarget} />
             <RightButtonPan setTarget={setCameraTarget} />
