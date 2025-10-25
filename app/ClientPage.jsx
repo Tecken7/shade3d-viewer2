@@ -131,7 +131,6 @@ function AnyModel({
       ...opts,
     })
 
-  // Load (nezávislé na autoSmooth)
   useEffect(() => {
     let cancelled = false
     setLoading(true)
@@ -193,7 +192,7 @@ function AnyModel({
     return () => { cancelled = true }
   }, [url, ext])
 
-  // Re-smoothing (bez resetu kamery)
+  // Re-smoothing – bez resetu kamery
   useEffect(() => {
     if (!object3D) return
     object3D.traverse((child) => {
@@ -252,7 +251,7 @@ function Headlight({ enabled = true, intensity = 2, color = "#ffffff" }) {
   return <pointLight ref={ref} color={color} intensity={enabled ? intensity : 0} distance={0} decay={0} />
 }
 
-/* ---------- Trackball (konzistentní pan) ---------- */
+/* ---------- Trackball (jen rotace/zoom) + vlastní pan pro pravé tlačítko ---------- */
 function TouchTrackballControls({ target = [0, 0, 0] }) {
   const { camera, gl, size } = useThree()
   const controlsRef = useRef(null)
@@ -261,9 +260,15 @@ function TouchTrackballControls({ target = [0, 0, 0] }) {
     const controls = new TrackballControls(camera, gl.domElement)
     controls.rotateSpeed = 5.0
     controls.zoomSpeed = 1.2
-    controls.panSpeed = 1.0       // přepočítáme ve frame
+    controls.panSpeed = 0.0            // vypneme interní pan
     controls.staticMoving = true
     controls.dynamicDampingFactor = 0.12
+    // mapování tlačítek: pravé = ROTATE (aby trackball NIKDY nepanoval)
+    controls.mouseButtons = {
+      LEFT: THREE.MOUSE.ROTATE,
+      MIDDLE: THREE.MOUSE.ZOOM,
+      RIGHT: THREE.MOUSE.ROTATE,
+    }
     controlsRef.current = controls
 
     const ts = (e) => { e.preventDefault(); controls.handleTouchStart(e) }
@@ -290,14 +295,83 @@ function TouchTrackballControls({ target = [0, 0, 0] }) {
   }, [size.width, size.height])
 
   useFrame(() => {
-    const c = controlsRef.current
-    if (!c) return
-    // sjednocená rychlost panu: škálujeme jen velikostí okna (ne zoomem)
-    const K = 0.004 // doladění citlivosti
-    const pixels = Math.max(size.width, size.height)
-    c.panSpeed = pixels * K
-    c.update()
+    controlsRef.current?.update()
   })
+
+  return null
+}
+
+/* ---------- Vlastní pan (pravé tlačítko) – pixel-přesný a konzistentní ---------- */
+function RightButtonPan({ setTarget }) {
+  const { camera, gl, size } = useThree()
+  const isPanning = useRef(false)
+  const last = useRef({ x: 0, y: 0 })
+
+  useEffect(() => {
+    const el = gl.domElement
+
+    const onContext = (e) => {
+      // aby se neotvíral kontextový panel
+      e.preventDefault()
+    }
+
+    const onDown = (e) => {
+      // jen pravé tlačítko (nebo Ctrl+Left jako fallback)
+      if ((e.button !== 2) && !(e.button === 0 && e.ctrlKey)) return
+      e.preventDefault()
+      isPanning.current = true
+      last.current = { x: e.clientX, y: e.clientY }
+      el.setPointerCapture?.(e.pointerId || 1)
+    }
+
+    const onMove = (e) => {
+      if (!isPanning.current) return
+      e.preventDefault()
+      const dx = e.clientX - last.current.x
+      const dy = e.clientY - last.current.y
+      last.current = { x: e.clientX, y: e.clientY }
+
+      if (camera.isOrthographicCamera) {
+        // světové jednotky na pixel (ortho je konstantní – nezávislé na Z)
+        const wppX = (camera.right - camera.left) / size.width
+        const wppY = (camera.top - camera.bottom) / size.height
+        const moveX = -dx * wppX
+        const moveY =  dy * wppY  // obrazovkové Y je opačně
+
+        camera.position.x += moveX
+        camera.position.y += moveY
+        camera.updateProjectionMatrix()
+        setTarget?.((t) => [t[0] + moveX, t[1] + moveY, t[2]])
+      } else {
+        // fallback pro perspektivu (nepoužíváme, ale ať je to robustní)
+        const distance = camera.position.length()
+        const scale = distance / Math.max(size.width, size.height)
+        const moveX = -dx * scale
+        const moveY =  dy * scale
+        camera.position.x += moveX
+        camera.position.y += moveY
+        setTarget?.((t) => [t[0] + moveX, t[1] + moveY, t[2]])
+      }
+    }
+
+    const onUp = (e) => {
+      if (!isPanning.current) return
+      e.preventDefault()
+      isPanning.current = false
+      try { el.releasePointerCapture?.(e.pointerId || 1) } catch {}
+    }
+
+    el.addEventListener("contextmenu", onContext)
+    el.addEventListener("pointerdown", onDown)
+    window.addEventListener("pointermove", onMove)
+    window.addEventListener("pointerup", onUp)
+    return () => {
+      el.removeEventListener("contextmenu", onContext)
+      el.removeEventListener("pointerdown", onDown)
+      window.removeEventListener("pointermove", onMove)
+      window.removeEventListener("pointerup", onUp)
+    }
+  }, [camera, gl, size.width, size.height, setTarget])
 
   return null
 }
@@ -341,7 +415,7 @@ function AutoCenterAndFrame({
       setTarget([centerAll.x, centerAll.y, centerAll.z])
     }
 
-    // Recompute after centering
+    // recompute po centrování
     const after = new THREE.Box3().setFromObject(root)
     const dims2 = new THREE.Vector3()
     const ctr = new THREE.Vector3()
@@ -355,7 +429,7 @@ function AutoCenterAndFrame({
     let newZoom = Math.min(zoomX, zoomY)
     newZoom *= isMobile ? mobileScale : desktopScale
 
-    // fix clippingu po resize
+    // bezpečné near/far + pozice kamery → žádný „ořez“ ani na malém okně
     const depth = Math.max(dims2.z, Math.max(dims2.x, dims2.y) * 0.75) || 1
     const safeDist = depth * 4
     camera.near = Math.max(0.01, safeDist * 0.001)
@@ -863,6 +937,7 @@ export default function ClientPage() {
               centerMode={centerMode}
             />
             <TouchTrackballControls target={cameraTarget} />
+            <RightButtonPan setTarget={setCameraTarget} />
           </>
         )}
       </Canvas>
