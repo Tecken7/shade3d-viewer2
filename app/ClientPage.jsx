@@ -388,6 +388,12 @@ function Switch({ checked, onChange, label }) {
       onChange(!checked)
     }
   }
+
+  // rozměry na jednom místě
+  const TRACK_W = 38
+  const TRACK_H = 22
+  const KNOB = 18 // menší než výška -> hezké vnitřní okraje
+
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
       {label && <span style={{ opacity: 0.85 }}>{label}</span>}
@@ -399,14 +405,15 @@ function Switch({ checked, onChange, label }) {
         onKeyDown={handleKey}
         style={{
           position: "relative",
-          width: 38,
-          height: 22,
+          width: TRACK_W,
+          height: TRACK_H,
           borderRadius: 999,
           border: "1px solid rgba(255,255,255,.22)",
           background: checked ? "rgba(59,130,246,.45)" : "rgba(255,255,255,.10)",
           cursor: "pointer",
           transition: "background .15s ease, border-color .15s ease",
           outline: "none",
+          padding: 0,
         }}
         title={checked ? "Vypnout Auto smooth" : "Zapnout Auto smooth"}
       >
@@ -414,10 +421,11 @@ function Switch({ checked, onChange, label }) {
           aria-hidden
           style={{
             position: "absolute",
-            top: 1.5,
-            left: checked ? 19 : 1.5,
-            width: 19,
-            height: 19,
+            top: "50%",
+            transform: "translateY(-50%)",
+            left: checked ? TRACK_W - KNOB - 3 : 3, // 3px ≈ 2px okraj + 1px border
+            width: KNOB,
+            height: KNOB,
             borderRadius: "50%",
             background: "#fff",
             boxShadow: "0 1px 3px rgba(0,0,0,.35)",
