@@ -135,7 +135,8 @@ function AnyModel({
   roughness = 0.5, metalness = 0.5,
   useVertexColors = false,
   keepMaterials = false,
-  wireframe = false,            // zobrazit overlay hran (plný wireframe)
+  wireframe = false,            // overlay hran (full wireframe)
+  clipPlane = null,             // THREE.Plane nebo null
 }) {
   const [object3D, setObject3D] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -153,14 +154,12 @@ function AnyModel({
       ...opts,
     })
 
-  // helper: projít všemi meshi
   const forEachMesh = (obj, cb) => {
     obj?.traverse?.((child) => { if (child.isMesh) cb(child) })
   }
 
-  // vytvořit/obnovit plný wireframe overlay pro mesh
+  // vytvořit/obnovit plný wireframe overlay pro mesh (+ aplikovat clipping)
   const rebuildWireOverlay = (mesh) => {
-    // zruš starý overlay
     if (mesh.userData._edges) {
       mesh.userData._edges.geometry?.dispose?.()
       mesh.userData._edges.material?.dispose?.()
@@ -168,23 +167,20 @@ function AnyModel({
       mesh.userData._edges = null
     }
     if (!wireframe) return
-
     const geom = mesh.geometry
     if (!geom) return
 
-    // ⚠️ Full wireframe – všechny hrany trojúhelníků
     const wfGeom = new THREE.WireframeGeometry(geom)
-
-    // material – černé linky, vykreslit navrch povrchu
     const wfMat = new THREE.LineBasicMaterial({
       color: 0x000000,
       depthTest: true,
       depthWrite: false,
       transparent: true,
       opacity: 0.95,
-      polygonOffset: true,         // posunout trochu k kameře (z-bias)
+      polygonOffset: true,
       polygonOffsetFactor: -2,
       polygonOffsetUnits: -2,
+      clippingPlanes: clipPlane ? [clipPlane] : null,
     })
 
     const lines = new THREE.LineSegments(wfGeom, wfMat)
@@ -213,11 +209,9 @@ function AnyModel({
           let base = geom
           if (autoSmooth) base = autoSmoothGeometry(geom, DEFAULT_SMOOTH_ANGLE)
           else if (!geom.attributes.normal) geom.computeVertexNormals()
-
           const mat = hasVC && useVertexColors
             ? makeMat({ vertexColors: true, color: new THREE.Color("#ffffff") })
             : makeMat()
-
           obj = new THREE.Mesh(base, mat)
           obj.userData._baseGeom = geom
           obj.userData._derivedGeom = base
@@ -244,7 +238,7 @@ function AnyModel({
         }
 
         if (!cancelled) {
-          // vytvoř wireframe overlay podle stavu
+          // overlay dle stavu
           forEachMesh(obj, (mesh) => rebuildWireOverlay(mesh))
           setObject3D(obj)
           setLoading(false)
@@ -274,41 +268,47 @@ function AnyModel({
       child.geometry = newGeom
       child.userData._derivedGeom = newGeom
 
-      // rebuild overlay nad novou geometrií
       rebuildWireOverlay(child)
     })
   }, [object3D, autoSmooth])
 
-  // Materiály + přepínání overlay viditelnosti
+  // Materiály + clipping + přepínání overlay
   useEffect(() => {
     if (!object3D) return
+    const planes = clipPlane ? [clipPlane] : null
     forEachMesh(object3D, (child) => {
-      if (keepMaterials) {
-        const mat = child.material
-        if (mat) {
-          if ("transparent" in mat) mat.transparent = opacity < 1
-          if ("opacity" in mat) mat.opacity = opacity
-          if ("roughness" in mat && typeof roughness === "number") mat.roughness = roughness
-          if ("metalness" in mat && typeof metalness === "number") mat.metalness = metalness
-          if (!useVertexColors && "color" in mat && color) mat.color = new THREE.Color(color)
-          if (useVertexColors && "vertexColors" in mat) {
-            mat.vertexColors = true
-            if ("color" in mat) mat.color = new THREE.Color("#ffffff")
-          }
-          mat.needsUpdate = true
+      // materiály meshe
+      const applyToMat = (mat) => {
+        if (!mat) return
+        if ("transparent" in mat) mat.transparent = opacity < 1
+        if ("opacity" in mat) mat.opacity = opacity
+        if ("roughness" in mat && typeof roughness === "number") mat.roughness = roughness
+        if ("metalness" in mat && typeof metalness === "number") mat.metalness = metalness
+        if (!useVertexColors && "color" in mat && color) mat.color = new THREE.Color(color)
+        if (useVertexColors && "vertexColors" in mat) {
+          mat.vertexColors = true
+          if ("color" in mat) mat.color = new THREE.Color("#ffffff")
         }
-      } else {
-        const hasVC = !!child.geometry.getAttribute?.("color")
-        const mat = hasVC && useVertexColors
-          ? makeMat({ vertexColors: true, color: new THREE.Color("#ffffff") })
-          : makeMat()
-        child.material = mat
+        // clipping
+        mat.clippingPlanes = planes
+        mat.clipIntersection = false
+        mat.clipShadows = true
+        mat.needsUpdate = true
       }
-      // zapnout/vypnout overlay; když chybí a má být, postav ho
-      if (child.userData._edges) child.userData._edges.visible = !!wireframe
-      else if (wireframe) rebuildWireOverlay(child)
+      if (Array.isArray(child.material)) child.material.forEach(applyToMat)
+      else applyToMat(child.material)
+
+      // overlay linky
+      const edges = child.userData?._edges
+      if (edges && edges.material) {
+        edges.material.clippingPlanes = planes
+        edges.material.needsUpdate = true
+        edges.visible = !!wireframe
+      } else if (wireframe) {
+        rebuildWireOverlay(child)
+      }
     })
-  }, [object3D, color, opacity, roughness, metalness, useVertexColors, keepMaterials, wireframe])
+  }, [object3D, color, opacity, roughness, metalness, useVertexColors, keepMaterials, wireframe, clipPlane])
 
   if (!object3D) return loading ? <InlineLoader text={`Načítám ${name || url}`} /> : null
   return visible ? <primitive object={object3D} /> : null
@@ -334,12 +334,8 @@ function TouchTrackballControls({ target = [0, 0, 0] }) {
     controls.panSpeed = 1.0
     controls.staticMoving = true
     controls.dynamicDampingFactor = 0.15
-    controls.mouseButtons = {
-      LEFT: THREE.MOUSE.ROTATE,
-      MIDDLE: THREE.MOUSE.ZOOM,
-    }
+    controls.mouseButtons = { LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.ZOOM }
     controlsRef.current = controls
-
     return () => { controls.dispose() }
   }, [camera, gl])
 
@@ -357,9 +353,7 @@ function TouchTrackballControls({ target = [0, 0, 0] }) {
     c.update()
   })
 
-  useEffect(() => {
-    controlsRef.current?.handleResize()
-  }, [size.width, size.height])
+  useEffect(() => { controlsRef.current?.handleResize() }, [size.width, size.height])
 
   return null
 }
@@ -378,24 +372,18 @@ function RightButtonPan({ setTarget }) {
 
   useEffect(() => {
     const el = gl.domElement
-
     const onContext = (e) => { e.preventDefault() }
-
     const onDown = (e) => {
       if ((e.button !== 2) && !(e.button === 0 && e.ctrlKey)) return
-      e.preventDefault()
-      e.stopPropagation()
+      e.preventDefault(); e.stopPropagation()
       isPanning.current = true
       last.current = { x: e.clientX, y: e.clientY }
       pointerIdRef.current = e.pointerId
       try { el.setPointerCapture?.(e.pointerId) } catch {}
     }
-
     const onMove = (e) => {
       if (!isPanning.current) return
-      e.preventDefault()
-      e.stopPropagation()
-
+      e.preventDefault(); e.stopPropagation()
       const dx = e.clientX - last.current.x
       const dy = e.clientY - last.current.y
       last.current = { x: e.clientX, y: e.clientY }
@@ -421,11 +409,9 @@ function RightButtonPan({ setTarget }) {
         setTarget?.((t) => [t[0] + deltaWorld.x, t[1] + deltaWorld.y, t[2] + deltaWorld.z])
       }
     }
-
     const onUp = (e) => {
       if (!isPanning.current) return
-      e.preventDefault()
-      e.stopPropagation()
+      e.preventDefault(); e.stopPropagation()
       isPanning.current = false
       try { el.releasePointerCapture?.(pointerIdRef.current) } catch {}
       pointerIdRef.current = null
@@ -538,6 +524,13 @@ export default function ClientPage() {
   const handleModelLoaded = () => setLoadedCount((n) => n + 1)
   const centerParam = (getParam("center") || "combined").toLowerCase()
   const centerMode = ["per", "combined", "none"].includes(centerParam) ? centerParam : "combined"
+
+  // --- Section (clipping plane) ---
+  const [sectionOn, setSectionOn] = useState(false)
+  const [sectionAxis, setSectionAxis] = useState("z") // "x" | "y" | "z"
+  const [sectionOffset, setSectionOffset] = useState(0)
+  const [sectionRange, setSectionRange] = useState(50)
+  const sectionPlaneRef = useRef(new THREE.Plane(new THREE.Vector3(0, 0, 1), 0))
 
   useEffect(() => {
     ;(async () => {
@@ -669,6 +662,35 @@ export default function ClientPage() {
     })()
   }, [])
 
+  // Po načtení všeho spočítej rozsah posuvu roviny řezu dle bounding boxu
+  const rootRef = useRef()
+  useEffect(() => {
+    if (!rootRef.current) return
+    if (loadedCount !== files.length || files.length === 0) return
+    rootRef.current.updateMatrixWorld(true)
+    const box = new THREE.Box3().setFromObject(rootRef.current)
+    if (!box.isEmpty()) {
+      const size = new THREE.Vector3()
+      box.getSize(size)
+      const maxHalf = Math.max(size.x, size.y, size.z) * 0.5
+      setSectionRange(Math.max(1, maxHalf))
+      setSectionOffset(0)
+    }
+  }, [loadedCount, files.length])
+
+  // Aktualizace roviny při změně osy/offsetu
+  useEffect(() => {
+    const n = new THREE.Vector3(
+      sectionAxis === "x" ? 1 : 0,
+      sectionAxis === "y" ? 1 : 0,
+      sectionAxis === "z" ? 1 : 0
+    )
+    const plane = sectionPlaneRef.current
+    plane.normal.copy(n)
+    // Rovina kolmá k ose, posun = konstantní člen (negativní)
+    plane.constant = -sectionOffset
+  }, [sectionAxis, sectionOffset])
+
   const logoEl = logoCfg.url && (
     <img
       src={logoCfg.url}
@@ -688,8 +710,6 @@ export default function ClientPage() {
       }}
     />
   )
-
-  const rootRef = useRef()
 
   // --- obsah sliderů/ovládání jako blok ---
   const slidersContent = fatal ? (
@@ -732,13 +752,7 @@ export default function ClientPage() {
               border: "1px solid #fff", borderRadius: 4, cursor: "pointer",
             }}
           >
-            <img
-              src={(visibles[i] ?? true) ? ICONS.eye : ICONS.eyeOff}
-              alt=""
-              width={14}
-              height={14}
-              style={{ display: "block", pointerEvents: "none", userSelect: "none" }}
-            />
+            <img src={(visibles[i] ?? true) ? ICONS.eye : ICONS.eyeOff} alt="" width={14} height={14} style={{ display: "block", pointerEvents: "none", userSelect: "none" }} />
           </button>
         </div>
       ))}
@@ -747,6 +761,54 @@ export default function ClientPage() {
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginTop: 10 }}>
         <Switch checked={autoSmooth} onChange={setAutoSmooth} label="Auto smooth" />
         <Switch checked={wireframe} onChange={setWireframe} label="Wireframe" />
+      </div>
+
+      {/* Řez (clipping plane) */}
+      <div style={{ marginTop: 10, borderTop: "1px solid rgba(255,255,255,.15)", paddingTop: 10 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+          <Switch checked={sectionOn} onChange={setSectionOn} label="Řez (clipping)" />
+          <div role="group" aria-label="Směr řezu" style={{ display: "flex", gap: 6 }}>
+            {["x","y","z"].map((ax) => (
+              <button
+                key={ax}
+                onClick={() => setSectionAxis(ax)}
+                style={{
+                  padding: "2px 8px",
+                  borderRadius: 6,
+                  border: "1px solid rgba(255,255,255,.25)",
+                  background: sectionAxis === ax ? "rgba(255,255,255,.25)" : "transparent",
+                  color: "#fff",
+                  cursor: "pointer",
+                  fontSize: 12,
+                  fontWeight: 700,
+                  textTransform: "uppercase",
+                }}
+                title={`Rovina kolmá k ose ${ax.toUpperCase()}`}
+              >{ax}</button>
+            ))}
+          </div>
+        </div>
+
+        {sectionOn && (
+          <div style={{ marginTop: 8 }}>
+            <input
+              className="slider"
+              type="range"
+              min={-sectionRange}
+              max={sectionRange}
+              step={Math.max(sectionRange / 200, 0.001)}
+              value={sectionOffset}
+              onChange={(e) => setSectionOffset(parseFloat(e.target.value))}
+              aria-label="Posun roviny řezu"
+              style={{ width: "100%" }}
+            />
+            <div style={{ opacity: .8, fontSize: 12, display: "flex", justifyContent: "space-between" }}>
+              <span>-{sectionRange.toFixed(1)}</span>
+              <span>{sectionOffset.toFixed(2)}</span>
+              <span>+{sectionRange.toFixed(1)}</span>
+            </div>
+          </div>
+        )}
       </div>
     </>
   )
@@ -879,7 +941,16 @@ export default function ClientPage() {
       {logoEl}
       {sidebar}
 
-      <Canvas orthographic camera={{ position: [0, 0, 100], near: 0.01, far: 100000 }} gl={{ alpha: true }} onCreated={({ gl }) => gl.setClearAlpha(0)} style={{ position: "absolute", inset: 0, zIndex: 1, background: "transparent" }}>
+      <Canvas
+        orthographic
+        camera={{ position: [0, 0, 100], near: 0.01, far: 100000 }}
+        gl={{ alpha: true }}
+        onCreated={({ gl }) => {
+          gl.setClearAlpha(0)
+          gl.localClippingEnabled = true // <<< clipping zapnutý
+        }}
+        style={{ position: "absolute", inset: 0, zIndex: 1, background: "transparent" }}
+      >
         <>
           <ambientLight intensity={lightIntensity * 0.4 * (headlightCfg.enabled ? 0.5 : 1)} />
           <directionalLight position={[0, 5, 5]} intensity={lightIntensity * 1.5 * (headlightCfg.enabled ? 0.5 : 1)} />
@@ -905,12 +976,12 @@ export default function ClientPage() {
                   metalness={metalnesses[i] ?? (typeof f.m === "number" ? f.m : 0.5)}
                   useVertexColors={!!f.vc}
                   keepMaterials={!!f.km}
+                  clipPlane={sectionOn ? sectionPlaneRef.current : null}
                 />
               ))}
             </Suspense>
           </group>
 
-          {/* Centering & framing */}
           <AutoCenterAndFrame
             rootRef={rootRef}
             depsKey={loadedCount === files.length ? `ready-${files.length}` : `loading-${loadedCount}`}
@@ -934,19 +1005,12 @@ export default function ClientPage() {
         .slider::-webkit-slider-thumb { appearance: none; width: 14px; height: 14px; border-radius: 50%; background: white; cursor: pointer; box-shadow: 0 0 2px black; margin-top: -5px; }
         .slider::-moz-range-track { height: 4px; background: white; border-radius: 2px; }
         .slider::-moz-range-thumb { width: 14px; height: 14px; border-radius: 50%; background: white; cursor: pointer; box-shadow: 0 0 2px black; border: none; }
-
-        /* Color input – odstranění vnitřního šedého rámečku */
         .color-input { -webkit-appearance: none; appearance: none; }
         .color-input::-webkit-color-swatch-wrapper { padding: 0; }
         .color-input::-webkit-color-swatch { border: none; border-radius: 2px; }
         .color-input::-moz-color-swatch { border: none; }
-
         @media (max-width: 720px) {
-          .sidebar {
-            left: 8px !important;
-            width: calc(100vw - 16px) !important;
-            max-width: calc(100vw - 16px) !important;
-          }
+          .sidebar { left: 8px !important; width: calc(100vw - 16px) !important; max-width: calc(100vw - 16px) !important; }
         }
       `}</style>
     </div>
