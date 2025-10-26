@@ -14,12 +14,10 @@ import { PLYLoader } from "three/examples/jsm/loaders/PLYLoader"
 const SUPABASE_URL = "https://jqnkdjgmenerioodqcpa.supabase.co"
 const PUBLIC_BUCKET = "shade3d-viewer2"
 
-/* ---------- Ikony + preload ---------- */
+/* ---------- Ikony + preload (jen oko) ---------- */
 const ICONS = {
   eye: "/icons/Eye.png",
   eyeOff: "/icons/Eye-off.png",
-  arrowOpen: "/icons/Arrow-open.svg",
-  arrowClosed: "/icons/Arrow-closed.svg",
 }
 function PreloadIcons() {
   useEffect(() => {
@@ -470,7 +468,7 @@ export default function ClientPage() {
   const [photos, setPhotos] = useState([])
   const [lightbox, setLightbox] = useState({ open: false, src: null, alt: "" })
 
-  // Fotky: na mobilu výchozí stav sbaleno, na desktopu otevřeno
+  // Fotky: na mobilu sbaleno, na desktopu otevřeno
   const [photosOpen, setPhotosOpen] = useState(!isMobile)
   useEffect(() => { setPhotosOpen(!isMobile) }, [isMobile])
 
@@ -726,7 +724,7 @@ export default function ClientPage() {
         )}
       </div>
 
-      {/* Fotky – sbalitelné na mobilu */}
+      {/* Fotky – šipka ZŮSTÁVÁ jako dřív (rotace) */}
       {photos && photos.length > 0 && (
         <div style={{ marginTop: 10 }}>
           <button
@@ -749,13 +747,13 @@ export default function ClientPage() {
             }}
           >
             <span>Fotky ({photos.length})</span>
-            <img
-              src={photosOpen ? ICONS.arrowOpen : ICONS.arrowClosed}
-              alt=""
-              width={18}
-              height={18}
-              style={{ display: "block", opacity: 0.9 }}
-            />
+            <svg
+              width="18" height="18" viewBox="0 0 24 24" fill="none"
+              style={{ transform: photosOpen ? "rotate(90deg)" : "rotate(0deg)", transition: "transform .15s ease" }}
+              aria-hidden
+            >
+              <path d="M8 5l8 7-8 7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
           </button>
 
           {photosOpen && (
@@ -764,7 +762,7 @@ export default function ClientPage() {
                 {photos.map((p, i) => (
                   <button
                     key={i}
-                    onClick={() => setLightbox({ open: true, src: p.u, alt: p.n || `Photo ${i + 1}` })}
+                    onClick={() => setLightbox({ open: true, src: p.u, alt: p.n || `Photo ${i+1}` })}
                     style={{ padding: 0, margin: 0, border: "none", background: "transparent", cursor: "pointer", borderRadius: 8, overflow: "hidden", boxShadow: "0 1px 6px rgba(0,0,0,.35)", border: "1px solid rgba(255,255,255,.12)" }}
                     title={p.n || ""}
                   >
