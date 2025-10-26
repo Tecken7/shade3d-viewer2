@@ -59,7 +59,6 @@ const DEFAULT_SMOOTH_ANGLE = 30
 function autoSmoothGeometry(geometry, angleDeg = DEFAULT_SMOOTH_ANGLE) {
   const angle = Math.max(0, Math.min(89.9, angleDeg))
   const angleRad = (angle * Math.PI) / 180
-
   const g = geometry.index ? geometry.toNonIndexed() : geometry.clone()
   const pos = g.getAttribute("position")
   const vCount = pos.count
@@ -127,7 +126,7 @@ function InlineLoader({ text }) {
   )
 }
 
-/* ---------- AnyModel ---------- */
+/* ---------- AnyModel (mesh + wireframe overlay + clipping) ---------- */
 function AnyModel({
   name, url,
   color, opacity, visible,
@@ -135,8 +134,8 @@ function AnyModel({
   roughness = 0.5, metalness = 0.5,
   useVertexColors = false,
   keepMaterials = false,
-  wireframe = false,            // overlay hran (full wireframe)
-  clipPlane = null,             // THREE.Plane nebo null
+  wireframe = false,
+  clipPlane = null,
 }) {
   const [object3D, setObject3D] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -147,18 +146,12 @@ function AnyModel({
       color: new THREE.Color(color || "#ffffff"),
       roughness: typeof roughness === "number" ? roughness : 0.5,
       metalness: typeof metalness === "number" ? metalness : 0.5,
-      transparent: opacity < 1,
-      opacity,
-      side: THREE.DoubleSide,
-      depthWrite: opacity === 1,
-      ...opts,
+      transparent: opacity < 1, opacity,
+      side: THREE.DoubleSide, depthWrite: opacity === 1, ...opts,
     })
 
-  const forEachMesh = (obj, cb) => {
-    obj?.traverse?.((child) => { if (child.isMesh) cb(child) })
-  }
+  const forEachMesh = (obj, cb) => { obj?.traverse?.((child) => { if (child.isMesh) cb(child) }) }
 
-  // vytvořit/obnovit plný wireframe overlay pro mesh (+ aplikovat clipping)
   const rebuildWireOverlay = (mesh) => {
     if (mesh.userData._edges) {
       mesh.userData._edges.geometry?.dispose?.()
@@ -169,20 +162,13 @@ function AnyModel({
     if (!wireframe) return
     const geom = mesh.geometry
     if (!geom) return
-
     const wfGeom = new THREE.WireframeGeometry(geom)
     const wfMat = new THREE.LineBasicMaterial({
-      color: 0x000000,
-      depthTest: true,
-      depthWrite: false,
-      transparent: true,
-      opacity: 0.95,
-      polygonOffset: true,
-      polygonOffsetFactor: -2,
-      polygonOffsetUnits: -2,
+      color: 0x000000, depthTest: true, depthWrite: false,
+      transparent: true, opacity: 0.95,
+      polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2,
       clippingPlanes: clipPlane ? [clipPlane] : null,
     })
-
     const lines = new THREE.LineSegments(wfGeom, wfMat)
     lines.renderOrder = (mesh.renderOrder || 0) + 10
     mesh.add(lines)
@@ -209,9 +195,7 @@ function AnyModel({
           let base = geom
           if (autoSmooth) base = autoSmoothGeometry(geom, DEFAULT_SMOOTH_ANGLE)
           else if (!geom.attributes.normal) geom.computeVertexNormals()
-          const mat = hasVC && useVertexColors
-            ? makeMat({ vertexColors: true, color: new THREE.Color("#ffffff") })
-            : makeMat()
+          const mat = hasVC && useVertexColors ? makeMat({ vertexColors: true, color: new THREE.Color("#ffffff") }) : makeMat()
           obj = new THREE.Mesh(base, mat)
           obj.userData._baseGeom = geom
           obj.userData._derivedGeom = base
@@ -238,8 +222,7 @@ function AnyModel({
         }
 
         if (!cancelled) {
-          // overlay dle stavu
-          forEachMesh(obj, (mesh) => rebuildWireOverlay(mesh))
+          obj && forEachMesh(obj, (mesh) => rebuildWireOverlay(mesh))
           setObject3D(obj)
           setLoading(false)
           onLoaded && onLoaded(obj)
@@ -252,7 +235,6 @@ function AnyModel({
     return () => { cancelled = true }
   }, [url, ext])
 
-  // Re-smoothing – po změně geometrie přegeneruj i overlay
   useEffect(() => {
     if (!object3D) return
     forEachMesh(object3D, (child) => {
@@ -261,23 +243,17 @@ function AnyModel({
       let newGeom = base
       if (autoSmooth) newGeom = autoSmoothGeometry(base, DEFAULT_SMOOTH_ANGLE)
       else { newGeom = base.clone(); newGeom.computeVertexNormals() }
-
-      if (child.userData._derivedGeom && child.userData._derivedGeom !== base) {
-        child.userData._derivedGeom.dispose()
-      }
+      if (child.userData._derivedGeom && child.userData._derivedGeom !== base) child.userData._derivedGeom.dispose()
       child.geometry = newGeom
       child.userData._derivedGeom = newGeom
-
       rebuildWireOverlay(child)
     })
   }, [object3D, autoSmooth])
 
-  // Materiály + clipping + přepínání overlay
   useEffect(() => {
     if (!object3D) return
     const planes = clipPlane ? [clipPlane] : null
     forEachMesh(object3D, (child) => {
-      // materiály meshe
       const applyToMat = (mat) => {
         if (!mat) return
         if ("transparent" in mat) mat.transparent = opacity < 1
@@ -285,11 +261,7 @@ function AnyModel({
         if ("roughness" in mat && typeof roughness === "number") mat.roughness = roughness
         if ("metalness" in mat && typeof metalness === "number") mat.metalness = metalness
         if (!useVertexColors && "color" in mat && color) mat.color = new THREE.Color(color)
-        if (useVertexColors && "vertexColors" in mat) {
-          mat.vertexColors = true
-          if ("color" in mat) mat.color = new THREE.Color("#ffffff")
-        }
-        // clipping
+        if (useVertexColors && "vertexColors" in mat) { mat.vertexColors = true; if ("color" in mat) mat.color = new THREE.Color("#ffffff") }
         mat.clippingPlanes = planes
         mat.clipIntersection = false
         mat.clipShadows = true
@@ -298,7 +270,6 @@ function AnyModel({
       if (Array.isArray(child.material)) child.material.forEach(applyToMat)
       else applyToMat(child.material)
 
-      // overlay linky
       const edges = child.userData?._edges
       if (edges && edges.material) {
         edges.material.clippingPlanes = planes
@@ -314,7 +285,7 @@ function AnyModel({
   return visible ? <primitive object={object3D} /> : null
 }
 
-/* ---------- Headlight (PointLight následující kameru) ---------- */
+/* ---------- Headlight ---------- */
 function Headlight({ enabled = true, intensity = 2, color = "#ffffff" }) {
   const { camera } = useThree()
   const ref = useRef(null)
@@ -322,11 +293,10 @@ function Headlight({ enabled = true, intensity = 2, color = "#ffffff" }) {
   return <pointLight ref={ref} color={color} intensity={enabled ? intensity : 0} distance={0} decay={0} />
 }
 
-/* ---------- Trackball (rotace/zoom, bez pravého tlačítka) ---------- */
-function TouchTrackballControls({ target = [0, 0, 0] }) {
+/* ---------- Trackball (touch-friendly) ---------- */
+function TouchTrackballControls({ target = [0, 0, 0], enabled = true }) {
   const { camera, gl, size } = useThree()
   const controlsRef = useRef(null)
-
   useEffect(() => {
     const controls = new TrackballControls(camera, gl.domElement)
     controls.rotateSpeed = 5.0
@@ -338,39 +308,36 @@ function TouchTrackballControls({ target = [0, 0, 0] }) {
     controlsRef.current = controls
     return () => { controls.dispose() }
   }, [camera, gl])
-
   useEffect(() => {
     const c = controlsRef.current
     if (!c) return
+    c.enabled = enabled
     c.target.set(target[0], target[1], target[2])
     c.update()
-  }, [target])
-
+  }, [target, enabled])
   useFrame(() => {
     const c = controlsRef.current
-    if (!c) return
+    if (!c || !c.enabled) return
     if (camera.isOrthographicCamera) c.panSpeed = camera.zoom * 0.4
     c.update()
   })
-
   useEffect(() => { controlsRef.current?.handleResize() }, [size.width, size.height])
-
   return null
 }
 
 /* ---------- Vlastní pan (pravé tlačítko / Ctrl+levé) ---------- */
-function RightButtonPan({ setTarget }) {
+function RightButtonPan({ setTarget, enabled = true }) {
   const { camera, gl, size } = useThree()
   const isPanning = useRef(false)
   const last = useRef({ x: 0, y: 0 })
   const pointerIdRef = useRef(null)
-
   const PAN_SENSITIVITY = 0.85
   const right = new THREE.Vector3()
   const up = new THREE.Vector3()
   const deltaWorld = new THREE.Vector3()
 
   useEffect(() => {
+    if (!enabled) return
     const el = gl.domElement
     const onContext = (e) => { e.preventDefault() }
     const onDown = (e) => {
@@ -387,16 +354,13 @@ function RightButtonPan({ setTarget }) {
       const dx = e.clientX - last.current.x
       const dy = e.clientY - last.current.y
       last.current = { x: e.clientX, y: e.clientY }
-
       right.setFromMatrixColumn(camera.matrixWorld, 0).normalize()
       up.setFromMatrixColumn(camera.matrixWorld, 1).normalize()
-
       if (camera.isOrthographicCamera) {
         const wppX = ((camera.right - camera.left) / (size.width * camera.zoom))
         const wppY = ((camera.top - camera.bottom) / (size.height * camera.zoom))
         const moveRight = -dx * wppX * PAN_SENSITIVITY
         const moveUp    =  dy * wppY * PAN_SENSITIVITY
-
         deltaWorld.copy(right).multiplyScalar(moveRight).addScaledVector(up, moveUp)
         camera.position.add(deltaWorld)
         setTarget?.((t) => [t[0] + deltaWorld.x, t[1] + deltaWorld.y, t[2] + deltaWorld.z])
@@ -409,14 +373,12 @@ function RightButtonPan({ setTarget }) {
         setTarget?.((t) => [t[0] + deltaWorld.x, t[1] + deltaWorld.y, t[2] + deltaWorld.z])
       }
     }
-    const onUp = (e) => {
+    const onUp = () => {
       if (!isPanning.current) return
-      e.preventDefault(); e.stopPropagation()
       isPanning.current = false
       try { el.releasePointerCapture?.(pointerIdRef.current) } catch {}
       pointerIdRef.current = null
     }
-
     el.addEventListener("contextmenu", onContext)
     el.addEventListener("pointerdown", onDown)
     window.addEventListener("pointermove", onMove, { capture: true })
@@ -427,53 +389,24 @@ function RightButtonPan({ setTarget }) {
       window.removeEventListener("pointermove", onMove, { capture: true })
       window.removeEventListener("pointerup", onUp, { capture: true })
     }
-  }, [camera, gl, size.width, size.height, setTarget])
-
+  }, [camera, gl, size.width, size.height, setTarget, enabled])
   return null
 }
 
 /* ---------- Slim Switch ---------- */
 function Switch({ checked, onChange, label }) {
-  const handleKey = (e) => {
-    if (e.key === "Enter" || e.key === " ") {
-      e.preventDefault()
-      onChange(!checked)
-    }
-  }
+  const handleKey = (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onChange(!checked) } }
   const TRACK_W = 38, TRACK_H = 22, KNOB = 18
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
       {label && <span style={{ opacity: 0.85 }}>{label}</span>}
-      <button
-        type="button"
-        role="switch"
-        aria-checked={checked}
-        onClick={() => onChange(!checked)}
-        onKeyDown={handleKey}
-        style={{
-          position: "relative",
-          width: TRACK_W, height: TRACK_H,
-          borderRadius: 999,
-          border: "1px solid rgba(255,255,255,.22)",
-          background: checked ? "rgba(59,130,246,.45)" : "rgba(255,255,255,.10)",
-          cursor: "pointer",
-          transition: "background .15s ease, border-color .15s ease",
-          outline: "none", padding: 0,
-        }}
-        title={label}
-      >
-        <span
-          aria-hidden
-          style={{
-            position: "absolute",
-            top: "50%", transform: "translateY(-50%)",
-            left: checked ? TRACK_W - KNOB - 3 : 3,
-            width: KNOB, height: KNOB,
-            borderRadius: "50%", background: "#fff",
-            boxShadow: "0 1px 3px rgba(0,0,0,.35)",
-            transition: "left .15s ease",
-          }}
-        />
+      <button type="button" role="switch" aria-checked={checked} onClick={() => onChange(!checked)} onKeyDown={handleKey}
+        style={{ position: "relative", width: TRACK_W, height: TRACK_H, borderRadius: 999, border: "1px solid rgba(255,255,255,.22)",
+        background: checked ? "rgba(59,130,246,.45)" : "rgba(255,255,255,.10)", cursor: "pointer", transition: "background .15s",
+        outline: "none", padding: 0 }}>
+        <span aria-hidden style={{ position: "absolute", top: "50%", transform: "translateY(-50%)",
+          left: checked ? TRACK_W - KNOB - 3 : 3, width: KNOB, height: KNOB, borderRadius: "50%", background: "#fff",
+          boxShadow: "0 1px 3px rgba(0,0,0,.35)", transition: "left .15s" }}/>
       </button>
     </div>
   )
@@ -507,15 +440,32 @@ export default function ClientPage() {
   const [autoSmooth, setAutoSmooth] = useState((getParam("smooth") ?? "1") !== "0")
   const [wireframe, setWireframe] = useState(false)
 
+  // --- Clipping (statické ovládání) ---
+  const [sectionOn, setSectionOn] = useState(false)
+  const [sectionAxis, setSectionAxis] = useState("z")
+  const [sectionOffset, setSectionOffset] = useState(0)
+  const [sectionRange, setSectionRange] = useState(50)
+  const sectionPlaneRef = useRef(new THREE.Plane(new THREE.Vector3(0, 0, 1), 0))
+
+  // --- ŘEZACÍ REŽIM MYŠÍ (volná rovina podle pohledu) ---
+  const [cutMode, setCutMode] = useState(false)
+  // „volná“ rovina: normála a vzdálenost od počátku
+  const freePlaneRef = useRef(new THREE.Plane(new THREE.Vector3(0, 0, 1), 0))
+  const [freePlaneActive, setFreePlaneActive] = useState(false) // zda aplikovat místo sectionPlaneRef
+  // interakce myší
+  const lastPosRef = useRef({ x: 0, y: 0 })
+  const isDraggingRef = useRef(false)
+
+  // … zbytek stavů a efekty (načtení manifestu) pokračují v ČÁSTI 2 …
+/* ---------- ČÁST 2/2 — Canvas, načítání dat, řezací režim myší, helpery ---------- */
+
+  // ostatní stavy pro UI a fotky
   const [logoCfg, setLogoCfg] = useState({ url: DEFAULT_LOGO, opacity: 0.9, width: 160, pos: "bc" })
   const [photos, setPhotos] = useState([])
   const [lightbox, setLightbox] = useState({ open: false, src: null, alt: "" })
-
-  // Fotky: na mobilu výchozí stav sbaleno, na desktopu otevřeno
   const [photosOpen, setPhotosOpen] = useState(!isMobile)
   useEffect(() => { setPhotosOpen(!isMobile) }, [isMobile])
 
-  // Slidery/ovládání: na mobilu sbaleno, na desktopu otevřeno
   const [slidersOpen, setSlidersOpen] = useState(!isMobile)
   useEffect(() => { setSlidersOpen(!isMobile) }, [isMobile])
 
@@ -525,13 +475,7 @@ export default function ClientPage() {
   const centerParam = (getParam("center") || "combined").toLowerCase()
   const centerMode = ["per", "combined", "none"].includes(centerParam) ? centerParam : "combined"
 
-  // --- Section (clipping plane) ---
-  const [sectionOn, setSectionOn] = useState(false)
-  const [sectionAxis, setSectionAxis] = useState("z") // "x" | "y" | "z"
-  const [sectionOffset, setSectionOffset] = useState(0)
-  const [sectionRange, setSectionRange] = useState(50)
-  const sectionPlaneRef = useRef(new THREE.Plane(new THREE.Vector3(0, 0, 1), 0))
-
+  // ---------- Načítání dat stejně jako dříve ----------
   useEffect(() => {
     ;(async () => {
       try {
@@ -662,23 +606,22 @@ export default function ClientPage() {
     })()
   }, [])
 
-  // Po načtení všeho spočítej rozsah posuvu roviny řezu dle bounding boxu
+  // ---------- Root + bounding box pro rozsah řezu ----------
   const rootRef = useRef()
   useEffect(() => {
     if (!rootRef.current) return
-    if (loadedCount !== files.length || files.length === 0) return
+    if (loadedCount === 0 || loadedCount !== files.length) return
     rootRef.current.updateMatrixWorld(true)
     const box = new THREE.Box3().setFromObject(rootRef.current)
     if (!box.isEmpty()) {
-      const size = new THREE.Vector3()
-      box.getSize(size)
+      const size = new THREE.Vector3(); box.getSize(size)
       const maxHalf = Math.max(size.x, size.y, size.z) * 0.5
       setSectionRange(Math.max(1, maxHalf))
       setSectionOffset(0)
     }
   }, [loadedCount, files.length])
 
-  // Aktualizace roviny při změně osy/offsetu
+  // ---------- Aktualizace statické roviny (osa/offset) ----------
   useEffect(() => {
     const n = new THREE.Vector3(
       sectionAxis === "x" ? 1 : 0,
@@ -687,31 +630,21 @@ export default function ClientPage() {
     )
     const plane = sectionPlaneRef.current
     plane.normal.copy(n)
-    // Rovina kolmá k ose, posun = konstantní člen (negativní)
     plane.constant = -sectionOffset
   }, [sectionAxis, sectionOffset])
 
-  const logoEl = logoCfg.url && (
-    <img
-      src={logoCfg.url}
-      alt=""
-      style={{
-        position: "absolute",
-        bottom: logoCfg.pos === "bc" || logoCfg.pos === "bl" || logoCfg.pos === "br" ? 12 : "auto",
-        left: logoCfg.pos === "bl" ? 12 : logoCfg.pos === "bc" ? "50%" : "auto",
-        right: logoCfg.pos === "br" ? 12 : "auto",
-        transform: logoCfg.pos === "bc" ? "translateX(-50%)" : "none",
-        width: logoCfg.width,
-        opacity: logoCfg.opacity,
-        zIndex: 0,
-        pointerEvents: "none",
-        userSelect: "none",
-        filter: "drop-shadow(0 0 1px rgba(0,0,0,.25))",
-      }}
-    />
-  )
+  // ---------- Přepínání mezi "statickým řezem" a "cut mode" ----------
+  const activePlaneRef = freePlaneActive ? freePlaneRef : (sectionOn ? sectionPlaneRef : null)
+  useEffect(() => {
+    if (cutMode) {
+      setFreePlaneActive(true)
+      setSectionOn(false)
+    } else {
+      setFreePlaneActive(false)
+    }
+  }, [cutMode])
 
-  // --- obsah sliderů/ovládání jako blok ---
+  // ---------- UI blok (slidery + přepínače) ----------
   const slidersContent = fatal ? (
     <div style={{ color: "#ff8b8b" }}>{fatal}</div>
   ) : (
@@ -745,12 +678,8 @@ export default function ClientPage() {
             onClick={() => setVisibles((prev) => prev.map((v, idx) => (idx === i ? !v : v)))}
             aria-label={visibles[i] ? `Hide ${f.name}` : `Show ${f.name}`}
             title={visibles[i] ? "Skrýt" : "Zobrazit"}
-            style={{
-              width: 36, height: 22,
-              display: "inline-flex", alignItems: "center", justifyContent: "center",
-              padding: 0, margin: 0, background: "transparent",
-              border: "1px solid #fff", borderRadius: 4, cursor: "pointer",
-            }}
+            style={{ width: 36, height: 22, display: "inline-flex", alignItems: "center", justifyContent: "center",
+              padding: 0, margin: 0, background: "transparent", border: "1px solid #fff", borderRadius: 4, cursor: "pointer" }}
           >
             <img src={(visibles[i] ?? true) ? ICONS.eye : ICONS.eyeOff} alt="" width={14} height={14} style={{ display: "block", pointerEvents: "none", userSelect: "none" }} />
           </button>
@@ -763,46 +692,30 @@ export default function ClientPage() {
         <Switch checked={wireframe} onChange={setWireframe} label="Wireframe" />
       </div>
 
-      {/* Řez (clipping plane) */}
+      {/* Statický řez (osa/offset) */}
       <div style={{ marginTop: 10, borderTop: "1px solid rgba(255,255,255,.15)", paddingTop: 10 }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
-          <Switch checked={sectionOn} onChange={setSectionOn} label="Řez (clipping)" />
+          <Switch checked={sectionOn} onChange={(v)=>{ setSectionOn(v); if(v) setCutMode(false) }} label="Řez (osa/slider)" />
           <div role="group" aria-label="Směr řezu" style={{ display: "flex", gap: 6 }}>
             {["x","y","z"].map((ax) => (
-              <button
-                key={ax}
-                onClick={() => setSectionAxis(ax)}
-                style={{
-                  padding: "2px 8px",
-                  borderRadius: 6,
-                  border: "1px solid rgba(255,255,255,.25)",
+              <button key={ax} onClick={() => setSectionAxis(ax)}
+                style={{ padding: "2px 8px", borderRadius: 6, border: "1px solid rgba(255,255,255,.25)",
                   background: sectionAxis === ax ? "rgba(255,255,255,.25)" : "transparent",
-                  color: "#fff",
-                  cursor: "pointer",
-                  fontSize: 12,
-                  fontWeight: 700,
-                  textTransform: "uppercase",
-                }}
-                title={`Rovina kolmá k ose ${ax.toUpperCase()}`}
-              >{ax}</button>
+                  color: "#fff", cursor: "pointer", fontSize: 12, fontWeight: 700, textTransform: "uppercase" }}
+                title={`Rovina kolmá k ose ${ax.toUpperCase()}`}>{ax}</button>
             ))}
           </div>
         </div>
 
         {sectionOn && (
           <div style={{ marginTop: 8 }}>
-            <input
-              className="slider"
-              type="range"
-              min={-sectionRange}
-              max={sectionRange}
-              step={Math.max(sectionRange / 200, 0.001)}
+            <input className="slider" type="range"
+              min={-sectionRange} max={sectionRange} step={Math.max(sectionRange/200, 0.001)}
               value={sectionOffset}
-              onChange={(e) => setSectionOffset(parseFloat(e.target.value))}
-              aria-label="Posun roviny řezu"
-              style={{ width: "100%" }}
+              onChange={(e)=>setSectionOffset(parseFloat(e.target.value))}
+              aria-label="Posun roviny řezu" style={{ width: "100%" }}
             />
-            <div style={{ opacity: .8, fontSize: 12, display: "flex", justifyContent: "space-between" }}>
+            <div style={{ opacity:.8, fontSize:12, display:"flex", justifyContent:"space-between" }}>
               <span>-{sectionRange.toFixed(1)}</span>
               <span>{sectionOffset.toFixed(2)}</span>
               <span>+{sectionRange.toFixed(1)}</span>
@@ -810,121 +723,81 @@ export default function ClientPage() {
           </div>
         )}
       </div>
+
+      {/* Řezací režim myší */}
+      <div style={{ marginTop: 10, borderTop: "1px solid rgba(255,255,255,.15)", paddingTop: 10 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+          <Switch checked={cutMode} onChange={(v)=>{ setCutMode(v); if(v) setSectionOn(false) }} label="Řezací režim (myš)" />
+          <div style={{ opacity:.8, fontSize:12 }}>Tah = posun, Shift+Tah = rotace</div>
+        </div>
+      </div>
     </>
   )
 
+  // ---------- Sidebar s titulkem, collapsible sekcemi a fotkami ----------
   const sidebar = (
-    <div
-      className="sidebar"
-      style={{
-        position: "absolute",
-        top: 10, left: 10, zIndex: 2,
-        width: "clamp(260px, 28vw, 420px)",
-        maxWidth: "calc(100vw - 20px)",
-        color: "white", fontFamily: "sans-serif", fontSize: 14,
-        backdropFilter: "blur(3px)", background: "rgba(0,0,0,.25)",
-        border: "1px solid rgba(255,255,255,.15)", borderRadius: 10,
-        padding: 10, boxSizing: "border-box",
-        maxHeight: "calc(100vh - 20px)", overflowY: "auto",
-      }}
-    >
-      {/* Titulek mimo ohraničení slider panelu */}
+    <div className="sidebar" style={{
+      position:"absolute", top:10, left:10, zIndex:2, width:"clamp(260px, 28vw, 420px)",
+      maxWidth:"calc(100vw - 20px)", color:"white", fontFamily:"sans-serif", fontSize:14,
+      backdropFilter:"blur(3px)", background:"rgba(0,0,0,.25)", border:"1px solid rgba(255,255,255,.15)",
+      borderRadius:10, padding:10, boxSizing:"border-box", maxHeight:"calc(100vh - 20px)", overflowY:"auto"
+    }}>
       {title && (
-        <div
-          title={title}
-          style={{
-            marginBottom: 10,
-            padding: "10px 12px",
-            borderRadius: 10,
-            border: "1px solid rgba(255,255,255,.18)",
-            background: "rgba(255,255,255,.08)",
-            fontSize: 13,
-            fontWeight: 700,
-            whiteSpace: "nowrap",
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-          }}
-        >
-          {title}
-        </div>
+        <div title={title} style={{
+          marginBottom:10, padding:"10px 12px", borderRadius:10, border:"1px solid rgba(255,255,255,.18)",
+          background:"rgba(255,255,255,.08)", fontSize:13, fontWeight:700, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis"
+        }}>{title}</div>
       )}
 
-      {/* Slidery – na mobilu rozklikávací stejně jako Fotky */}
       <div>
         {isMobile ? (
           <>
-            <button
-              onClick={() => setSlidersOpen((o) => !o)}
-              aria-expanded={slidersOpen}
-              style={{
-                width: "100%",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                gap: 10,
-                padding: "10px 12px",
-                background: "rgba(255,255,255,.08)",
-                border: "1px solid rgba(255,255,255,.18)",
-                borderRadius: 10,
-                color: "#fff",
-                cursor: "pointer",
-                fontWeight: 700,
-                fontSize: 13,
-              }}
-            >
+            <button onClick={()=>setSlidersOpen(o=>!o)} aria-expanded={slidersOpen} style={{
+              width:"100%", display:"flex", alignItems:"center", justifyContent:"space-between", gap:10,
+              padding:"10px 12px", background:"rgba(255,255,255,.08)", border:"1px solid rgba(255,255,255,.18)",
+              borderRadius:10, color:"#fff", cursor:"pointer", fontWeight:700, fontSize:13
+            }}>
               <span>Nastavení modelu</span>
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" style={{ transform: slidersOpen ? "rotate(90deg)" : "rotate(0deg)", transition: "transform .15s ease" }} aria-hidden>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none"
+                   style={{ transform:slidersOpen ? "rotate(90deg)" : "rotate(0deg)", transition:"transform .15s ease" }} aria-hidden>
                 <path d="M8 5l8 7-8 7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
               </svg>
             </button>
-
             {slidersOpen && (
-              <div style={{ marginTop: 8, border: "1px solid rgba(255,255,255,.15)", borderRadius: 10, background: "rgba(255,255,255,.06)", padding: 10 }}>
+              <div style={{ marginTop:8, border:"1px solid rgba(255,255,255,.15)", borderRadius:10, background:"rgba(255,255,255,.06)", padding:10 }}>
                 {slidersContent}
               </div>
             )}
           </>
         ) : (
-          <div style={{ border: "1px solid rgba(255,255,255,.15)", borderRadius: 10, padding: 10, background: "rgba(255,255,255,.06)" }}>
+          <div style={{ border:"1px solid rgba(255,255,255,.15)", borderRadius:10, padding:10, background:"rgba(255,255,255,.06)" }}>
             {slidersContent}
           </div>
         )}
       </div>
 
-      {/* Fotky – sbalitelné na mobilu */}
       {photos && photos.length > 0 && (
         <div style={{ marginTop: 10 }}>
-          <button
-            onClick={() => setPhotosOpen((o) => !o)}
-            aria-expanded={photosOpen}
-            style={{
-              width: "100%",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-              gap: 10,
-              padding: "10px 12px",
-              background: "rgba(255,255,255,.08)",
-              border: "1px solid rgba(255,255,255,.18)",
-              borderRadius: 10,
-              color: "#fff",
-              cursor: "pointer",
-              fontWeight: 700,
-              fontSize: 13,
-            }}
-          >
+          <button onClick={()=>setPhotosOpen(o=>!o)} aria-expanded={photosOpen} style={{
+            width:"100%", display:"flex", alignItems:"center", justifyContent:"space-between", gap:10,
+            padding:"10px 12px", background:"rgba(255,255,255,.08)", border:"1px solid rgba(255,255,255,.18)",
+            borderRadius:10, color:"#fff", cursor:"pointer", fontWeight:700, fontSize:13
+          }}>
             <span>Fotky ({photos.length})</span>
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" style={{ transform: photosOpen ? "rotate(90deg)" : "rotate(0deg)", transition: "transform .15s ease" }} aria-hidden>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none"
+                 style={{ transform:photosOpen ? "rotate(90deg)" : "rotate(0deg)", transition:"transform .15s ease" }} aria-hidden>
               <path d="M8 5l8 7-8 7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
             </svg>
           </button>
-
           {photosOpen && (
-            <div style={{ marginTop: 8, border: "1px solid rgba(255,255,255,.15)", borderRadius: 10, background: "rgba(255,255,255,.06)", padding: 8 }}>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(72px, 1fr))", gap: 8 }}>
+            <div style={{ marginTop:8, border:"1px solid rgba(255,255,255,.15)", borderRadius:10, background:"rgba(255,255,255,.06)", padding:8 }}>
+              <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill, minmax(72px, 1fr))", gap:8 }}>
                 {photos.map((p, i) => (
-                  <button key={i} onClick={() => setLightbox({ open: true, src: p.u, alt: p.n || `Photo ${i+1}` })} style={{ padding: 0, margin: 0, border: "none", background: "transparent", cursor: "pointer", borderRadius: 8, overflow: "hidden", boxShadow: "0 1px 6px rgba(0,0,0,.35)", border: "1px solid rgba(255,255,255,.12)" }} title={p.n || ""}>
-                    <img src={p.u} alt={p.n || ""} loading="lazy" style={{ display: "block", width: "100%", height: 72, objectFit: "cover" }} />
+                  <button key={i} onClick={()=>setLightbox({ open:true, src:p.u, alt:p.n || `Photo ${i+1}` })}
+                    style={{ padding:0, margin:0, border:"none", background:"transparent", cursor:"pointer",
+                      borderRadius:8, overflow:"hidden", boxShadow:"0 1px 6px rgba(0,0,0,.35)", border:"1px solid rgba(255,255,255,.12)" }}
+                    title={p.n || ""}>
+                    <img src={p.u} alt={p.n || ""} loading="lazy" style={{ display:"block", width:"100%", height:72, objectFit:"cover" }} />
                   </button>
                 ))}
               </div>
@@ -935,28 +808,47 @@ export default function ClientPage() {
     </div>
   )
 
+  // ---------- Logo ----------
+  const logoEl = logoCfg.url && (
+    <img src={logoCfg.url} alt="" style={{
+      position:"absolute",
+      bottom: logoCfg.pos === "bc" || logoCfg.pos === "bl" || logoCfg.pos === "br" ? 12 : "auto",
+      left: logoCfg.pos === "bl" ? 12 : logoCfg.pos === "bc" ? "50%" : "auto",
+      right: logoCfg.pos === "br" ? 12 : "auto",
+      transform: logoCfg.pos === "bc" ? "translateX(-50%)" : "none",
+      width: logoCfg.width, opacity: logoCfg.opacity, zIndex:0, pointerEvents:"none", userSelect:"none",
+      filter:"drop-shadow(0 0 1px rgba(0,0,0,.25))"
+    }}/>
+  )
+
+  // ---------- Render ----------
   return (
-    <div className="stage" style={{ position: "relative", width: "100vw", height: "100vh", background: "black" }}>
+    <div className="stage" style={{ position:"relative", width:"100vw", height:"100vh", background:"black" }}>
       <PreloadIcons />
       {logoEl}
       {sidebar}
 
       <Canvas
         orthographic
-        camera={{ position: [0, 0, 100], near: 0.01, far: 100000 }}
-        gl={{ alpha: true }}
-        onCreated={({ gl }) => {
+        camera={{ position:[0,0,100], near:0.01, far:100000 }}
+        gl={{ alpha:true }}
+        onCreated={({ gl, camera }) => {
           gl.setClearAlpha(0)
-          gl.localClippingEnabled = true // <<< clipping zapnutý
+          gl.localClippingEnabled = true
+          // inicializuj volnou rovinu podle pohledu
+          const dir = new THREE.Vector3()
+          camera.getWorldDirection(dir)
+          freePlaneRef.current.normal.copy(dir.normalize())
+          freePlaneRef.current.constant = 0
         }}
-        style={{ position: "absolute", inset: 0, zIndex: 1, background: "transparent" }}
+        style={{ position:"absolute", inset:0, zIndex:1, background:"transparent" }}
       >
         <>
           <ambientLight intensity={lightIntensity * 0.4 * (headlightCfg.enabled ? 0.5 : 1)} />
-          <directionalLight position={[0, 5, 5]} intensity={lightIntensity * 1.5 * (headlightCfg.enabled ? 0.5 : 1)} />
-          <directionalLight position={[-10, 0, 0]} intensity={lightIntensity * 1.0 * (headlightCfg.enabled ? 0.5 : 1)} />
-          <directionalLight position={[10, 0, 0]} intensity={lightIntensity * 1.2 * (headlightCfg.enabled ? 0.5 : 1)} />
-          <directionalLight position={[0, -5, -5]} intensity={lightIntensity * 0.8 * (headlightCfg.enabled ? 0.5 : 1)} />
+          <directionalLight position={[0,5,5]} intensity={lightIntensity * 1.5 * (headlightCfg.enabled ? 0.5 : 1)} />
+          <directionalLight position={[-10,0,0]} intensity={lightIntensity * 1.0 * (headlightCfg.enabled ? 0.5 : 1)} />
+          <directionalLight position={[10,0,0]} intensity={lightIntensity * 1.2 * (headlightCfg.enabled ? 0.5 : 1)} />
+          <directionalLight position={[0,-5,-5]} intensity={lightIntensity * 0.8 * (headlightCfg.enabled ? 0.5 : 1)} />
           <Headlight enabled={headlightCfg.enabled} intensity={headlightCfg.intensity} />
 
           <group ref={rootRef}>
@@ -976,12 +868,13 @@ export default function ClientPage() {
                   metalness={metalnesses[i] ?? (typeof f.m === "number" ? f.m : 0.5)}
                   useVertexColors={!!f.vc}
                   keepMaterials={!!f.km}
-                  clipPlane={sectionOn ? sectionPlaneRef.current : null}
+                  clipPlane={activePlaneRef ? activePlaneRef.current : null}
                 />
               ))}
             </Suspense>
           </group>
 
+          {/* Centrovaní & zarámování */}
           <AutoCenterAndFrame
             rootRef={rootRef}
             depsKey={loadedCount === files.length ? `ready-${files.length}` : `loading-${loadedCount}`}
@@ -990,14 +883,20 @@ export default function ClientPage() {
             isMobile={isMobile}
             desktopScale={0.4}
             mobileScale={1.0}
-            centerMode={"combined"}
+            centerMode={centerMode}
           />
-          <TouchTrackballControls target={cameraTarget} />
-          <RightButtonPan setTarget={setCameraTarget} />
+
+          {/* Řezací režim myší – helper + ovládání */}
+          <CutPlaneHelper planeRef={activePlaneRef} visible={!!activePlaneRef} size={Math.max(100, sectionRange*2)} />
+          <CutModeControls enabled={cutMode} planeRef={freePlaneRef} />
+
+          {/* Navigace: vypnout při cutMode, ať se to nebije s ovládáním roviny */}
+          <TouchTrackballControls target={cameraTarget} enabled={!cutMode} />
+          <RightButtonPan setTarget={setCameraTarget} enabled={!cutMode} />
         </>
       </Canvas>
 
-      <Lightbox open={lightbox.open} onClose={() => setLightbox({ open: false, src: null, alt: "" })} src={lightbox.src} alt={lightbox.alt} />
+      <Lightbox open={lightbox.open} onClose={()=>setLightbox({ open:false, src:null, alt:"" })} src={lightbox.src} alt={lightbox.alt} />
 
       <style jsx global>{`
         .slider { appearance: none; height: 14px; background: transparent; margin: 5px 0; display: inline-block; }
@@ -1017,18 +916,16 @@ export default function ClientPage() {
   )
 }
 
-/* ---------- AutoCenter & AutoFrame ---------- */
+/* ---------- Helper: automatické centrování a zarámování ---------- */
 function AutoCenterAndFrame({
   rootRef, depsKey, setTarget,
   margin = 1.2, isMobile = false, desktopScale = 0.4, mobileScale = 1.0,
   centerMode = "combined",
 }) {
   const { camera, size } = useThree()
-
   useEffect(() => {
     const root = rootRef.current
     if (!root) return
-
     root.updateMatrixWorld(true)
     const boxAll = new THREE.Box3().setFromObject(root)
     if (boxAll.isEmpty()) return
@@ -1047,11 +944,11 @@ function AutoCenterAndFrame({
         child.position.sub(cWorld)
       })
       root.updateMatrixWorld(true)
-      setTarget([0, 0, 0])
+      setTarget([0,0,0])
     } else if (centerMode === "combined") {
       root.position.sub(centerAll)
       root.updateMatrixWorld(true)
-      setTarget([0, 0, 0])
+      setTarget([0,0,0])
     } else {
       setTarget([centerAll.x, centerAll.y, centerAll.z])
     }
@@ -1077,16 +974,114 @@ function AutoCenterAndFrame({
     camera.zoom = Math.max(newZoom, 0.01)
     camera.updateProjectionMatrix()
   }, [depsKey, size.width, size.height, isMobile, desktopScale, mobileScale, margin, centerMode, setTarget])
+  return null
+}
+
+/* ---------- Helper: vizuální rovina (PlaneHelper) ---------- */
+function CutPlaneHelper({ planeRef, visible = true, size = 200 }) {
+  const { scene } = useThree()
+  const helperRef = useRef(null)
+  useEffect(() => {
+    if (!planeRef) return
+    const plane = planeRef.current
+    const helper = new THREE.PlaneHelper(plane, size, 0x00ffff)
+    helper.visible = !!visible
+    scene.add(helper)
+    helperRef.current = helper
+    return () => { scene.remove(helper); helper.geometry?.dispose?.(); helper.material?.dispose?.() }
+  }, [scene, planeRef, size])
+
+  useEffect(() => {
+    if (helperRef.current) helperRef.current.visible = !!visible
+  }, [visible])
 
   return null
 }
 
-/* ---------- Lightbox ---------- */
-function Lightbox({ open, onClose, src, alt }) {
-  if (!open || !src) return null
-  return (
-    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.85)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50 }}>
-      <img src={src} alt={alt || ""} style={{ maxWidth: "96vw", maxHeight: "92vh", objectFit: "contain", borderRadius: 12, boxShadow: "0 10px 40px rgba(0,0,0,.6)", border: "1px solid rgba(255,255,255,.15)" }} />
-    </div>
-  )
+/* ---------- Ovládání myší pro "cut mode" ---------- */
+function CutModeControls({ enabled, planeRef }) {
+  const { gl, camera, size } = useThree()
+  const isDragging = useRef(false)
+  const last = useRef({ x: 0, y: 0 })
+
+  useEffect(() => {
+    const el = gl.domElement
+    if (!enabled) return
+
+    const onDown = (e) => {
+      if (e.button !== 0) return
+      e.preventDefault(); e.stopPropagation()
+      isDragging.current = true
+      last.current = { x: e.clientX, y: e.clientY }
+
+      // když začnu, zarovnej rovinu na pohled
+      const dir = new THREE.Vector3()
+      camera.getWorldDirection(dir)
+      planeRef.current.normal.copy(dir.normalize())
+      // posuň rovinu do středu obrazovky (projekčně)
+      planeRef.current.constant = 0
+      try { el.setPointerCapture?.(e.pointerId) } catch {}
+    }
+
+    const onMove = (e) => {
+      if (!isDragging.current) return
+      e.preventDefault(); e.stopPropagation()
+      const dx = e.clientX - last.current.x
+      const dy = e.clientY - last.current.y
+      last.current = { x: e.clientX, y: e.clientY }
+
+      const plane = planeRef.current
+      const n = plane.normal.clone()
+
+      if (e.shiftKey) {
+        // ROTACE roviny kolem kamerových os (Right = X', Up = Y')
+        const right = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 0).normalize()
+        const up = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 1).normalize()
+        const rotSpeed = 0.005
+        const q = new THREE.Quaternion()
+        // yaw/pitch v lokálním basisu kamery
+        q.setFromAxisAngle(up, -dx * rotSpeed)     // horizontální pohyb = yaw
+        n.applyQuaternion(q)
+        q.setFromAxisAngle(right, dy * rotSpeed)   // vertikální pohyb = pitch
+        n.applyQuaternion(q)
+        n.normalize()
+        plane.normal.copy(n)
+      } else {
+        // POSUN roviny po normále (ortho: světové jednotky na pixel)
+        let wpp
+        if (camera.isOrthographicCamera) {
+          const w = (camera.right - camera.left) / camera.zoom
+          const h = (camera.top - camera.bottom) / camera.zoom
+          const wppX = w / size.width
+          const wppY = h / size.height
+          wpp = (wppX + wppY) * 0.5
+        } else {
+          // zjednodušený scale pro perspektivu
+          const dist = camera.position.length()
+          wpp = (dist / Math.max(size.width, size.height)) * 2.0
+        }
+        const move = (dy - dx * 0.0) * wpp // primárně podle vertikálního pohybu
+        // plane: n·p + constant = 0  => posun o s: constant -= s
+        plane.constant -= move
+      }
+    }
+
+    const onUp = (e) => {
+      if (!isDragging.current) return
+      e.preventDefault(); e.stopPropagation()
+      isDragging.current = false
+      try { el.releasePointerCapture?.(e.pointerId) } catch {}
+    }
+
+    el.addEventListener("pointerdown", onDown)
+    window.addEventListener("pointermove", onMove, { capture: true })
+    window.addEventListener("pointerup", onUp, { capture: true })
+    return () => {
+      el.removeEventListener("pointerdown", onDown)
+      window.removeEventListener("pointermove", onMove, { capture: true })
+      window.removeEventListener("pointerup", onUp, { capture: true })
+    }
+  }, [enabled, gl, camera, planeRef, size.width, size.height])
+
+  return null
 }
