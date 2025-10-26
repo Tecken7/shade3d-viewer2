@@ -321,80 +321,6 @@ function TouchTrackballControls({ target = [0, 0, 0] }) {
   return null
 }
 
-/* ---------- AutoCenter & AutoFrame ---------- */
-function AutoCenterAndFrame({
-  rootRef, depsKey, setTarget,
-  margin = 1.2, isMobile = false, desktopScale = 0.4, mobileScale = 1.0,
-  centerMode = "combined",
-}) {
-  const { camera, size } = useThree()
-
-  useEffect(() => {
-    const root = rootRef.current
-    if (!root) return
-
-    root.updateMatrixWorld(true)
-    const boxAll = new THREE.Box3().setFromObject(root)
-    if (boxAll.isEmpty()) return
-
-    const centerAll = new THREE.Vector3()
-    const dims = new THREE.Vector3()
-    boxAll.getCenter(centerAll)
-    boxAll.getSize(dims)
-
-    if (centerMode === "per") {
-      root.children.forEach((child) => {
-        const b = new THREE.Box3().setFromObject(child)
-        if (b.isEmpty()) return
-        const cWorld = new THREE.Vector3()
-        b.getCenter(cWorld)
-        child.position.sub(cWorld)
-      })
-      root.updateMatrixWorld(true)
-      setTarget([0, 0, 0])
-    } else if (centerMode === "combined") {
-      root.position.sub(centerAll)
-      root.updateMatrixWorld(true)
-      setTarget([0, 0, 0])
-    } else {
-      setTarget([centerAll.x, centerAll.y, centerAll.z])
-    }
-
-    const after = new THREE.Box3().setFromObject(root)
-    const dims2 = new THREE.Vector3()
-    const ctr = new THREE.Vector3()
-    after.getSize(dims2)
-    after.getCenter(ctr)
-
-    const objW = Math.max(dims2.x, 1e-6)
-    const objH = Math.max(dims2.y, 1e-6)
-    const zoomX = size.width / (objW * margin)
-    const zoomY = size.height / (objH * margin)
-    let newZoom = Math.min(zoomX, zoomY)
-    newZoom *= isMobile ? mobileScale : desktopScale
-
-    const depth = Math.max(dims2.z, Math.max(dims2.x, dims2.y) * 0.75) || 1
-    const safeDist = depth * 4
-    camera.near = Math.max(0.01, safeDist * 0.001)
-    camera.far = safeDist * 50 + 100
-    camera.position.set(ctr.x, ctr.y, ctr.z + safeDist)
-    camera.zoom = Math.max(newZoom, 0.01)
-    camera.updateProjectionMatrix()
-  }, [depsKey, size.width, size.height, isMobile, desktopScale, mobileScale, margin, centerMode, setTarget])
-
-  return null
-}
-
-/* ---------- Lightbox pro fotky ---------- */
-function Lightbox({ open, onClose, src, alt }) {
-  if (!open || !src) return null
-  return (
-    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.85)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50 }}>
-      <img src={src} alt={alt || ""} style={{ maxWidth: "96vw", maxHeight: "92vh", objectFit: "contain", borderRadius: 12, boxShadow: "0 10px 40px rgba(0,0,0,.6)", border: "1px solid rgba(255,255,255,.15)" }} />
-    </div>
-  )
-}
-
 /* ---------- Slim Switch (AutoSmooth) ---------- */
 function Switch({ checked, onChange, label }) {
   const handleKey = (e) => {
@@ -470,6 +396,10 @@ export default function ClientPage() {
   const [logoCfg, setLogoCfg] = useState({ url: DEFAULT_LOGO, opacity: 0.9, width: 160, pos: "bc" })
   const [photos, setPhotos] = useState([])
   const [lightbox, setLightbox] = useState({ open: false, src: null, alt: "" })
+
+  // Fotky: na mobilu výchozí stav sbaleno, na desktopu otevřeno
+  const [photosOpen, setPhotosOpen] = useState(!isMobile)
+  useEffect(() => { setPhotosOpen(!isMobile) }, [isMobile])
 
   const [cameraTarget, setCameraTarget] = useState([0, 0, 0])
   const [loadedCount, setLoadedCount] = useState(0)
@@ -657,17 +587,26 @@ export default function ClientPage() {
             )}
 
             {files.map((f, i) => (
-              <div key={i} className="control-row" style={{ display: "grid", gridTemplateColumns: "36px 1fr 26px", alignItems: "center", columnGap: 6, rowGap: 6, margin: "6px 0" }}>
+              <div key={i} className="control-row" style={{ display: "grid", gridTemplateColumns: "36px 1fr 36px", alignItems: "center", columnGap: 6, rowGap: 6, margin: "6px 0" }}>
                 <div className="row-label" style={{ gridColumn: "1 / -1", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={f.rawName || f.name}>
                   {stripExt(f.name)}:
                 </div>
 
+                {/* Color picker (stejná výška/šířka jako oko) */}
                 <input
                   type="color"
                   value={colors[i] ?? "#ffffff"}
                   onChange={(e) => setColors((prev) => prev.map((v, idx) => (idx === i ? e.target.value : v)))}
                   aria-label={`${f.name} color`}
-                  style={{ width: 36, height: 22, border: "1px solid #fff", borderRadius: 4, background: colors[i] ?? "#ffffff", padding: 0, cursor: "pointer" }}
+                  className="color-input"
+                  style={{
+                    width: 36, height: 22,
+                    border: "1px solid #fff",
+                    borderRadius: 4,
+                    padding: 0,
+                    cursor: "pointer",
+                    background: "transparent",
+                  }}
                 />
 
                 <input
@@ -679,17 +618,20 @@ export default function ClientPage() {
                   aria-label={`${f.name} opacity`}
                 />
 
+                {/* Oko – stejná krabička jako color input */}
                 <button
                   className={`toggle icon-btn ${visibles[i] ? "is-on" : "is-off"}`}
                   onClick={() => setVisibles((prev) => prev.map((v, idx) => (idx === i ? !v : v)))}
                   aria-label={visibles[i] ? `Hide ${f.name}` : `Show ${f.name}`}
                   title={visibles[i] ? "Skrýt" : "Zobrazit"}
                   style={{
-                    position: "relative",
-                    width: 26, height: 22, padding: 0,
+                    width: 36, height: 22,
                     display: "inline-flex", alignItems: "center", justifyContent: "center",
-                    overflow: "hidden", background: "transparent",
-                    border: "1px solid white", borderRadius: 6, color: "white", cursor: "pointer"
+                    padding: 0, margin: 0,
+                    background: "transparent",
+                    border: "1px solid #fff",
+                    borderRadius: 4,
+                    cursor: "pointer",
                   }}
                 >
                   <img
@@ -710,22 +652,61 @@ export default function ClientPage() {
         )}
       </div>
 
-      {/* Fotky */}
+      {/* Fotky – sbalitelné na mobilu */}
       {photos && photos.length > 0 && (
         <div style={{ marginTop: 10 }}>
-          <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 8, opacity: 0.9 }}>Fotky ({photos.length})</div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(72px, 1fr))", gap: 8, border: "1px solid rgba(255,255,255,.15)", borderRadius: 10, background: "rgba(255,255,255,.06)", padding: 8 }}>
-            {photos.map((p, i) => (
-              <button
-                key={i}
-                onClick={() => setLightbox({ open: true, src: p.u, alt: p.n || `Photo ${i + 1}` })}
-                style={{ padding: 0, margin: 0, border: "none", background: "transparent", cursor: "pointer", borderRadius: 8, overflow: "hidden", boxShadow: "0 1px 6px rgba(0,0,0,.35)", border: "1px solid rgba(255,255,255,.12)" }}
-                title={p.n || ""}
+          <button
+            onClick={() => setPhotosOpen((o) => !o)}
+            aria-expanded={photosOpen}
+            style={{
+              width: "100%",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: 10,
+              padding: "10px 12px",
+              background: "rgba(255,255,255,.08)",
+              border: "1px solid rgba(255,255,255,.18)",
+              borderRadius: 10,
+              color: "#fff",
+              cursor: "pointer",
+              fontWeight: 700,
+              fontSize: 13,
+            }}
+          >
+            <span>Fotky ({photos.length})</span>
+            {/* šipka (rotuje podle otevření) */}
+            <svg
+              width="18" height="18" viewBox="0 0 24 24" fill="none"
+              style={{ transform: photosOpen ? "rotate(90deg)" : "rotate(0deg)", transition: "transform .15s ease" }}
+              aria-hidden
+            >
+              <path d="M8 5l8 7-8 7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
+          </button>
+
+          {photosOpen && (
+            <div style={{ marginTop: 8, border: "1px solid rgba(255,255,255,.15)", borderRadius: 10, background: "rgba(255,255,255,.06)", padding: 8 }}>
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(auto-fill, minmax(72px, 1fr))",
+                  gap: 8,
+                }}
               >
-                <img src={p.u} alt={p.n || ""} loading="lazy" style={{ display: "block", width: "100%", height: 72, objectFit: "cover" }} />
-              </button>
-            ))}
-          </div>
+                {photos.map((p, i) => (
+                  <button
+                    key={i}
+                    onClick={() => setLightbox({ open: true, src: p.u, alt: p.n || `Photo ${i+1}` })}
+                    style={{ padding: 0, margin: 0, border: "none", background: "transparent", cursor: "pointer", borderRadius: 8, overflow: "hidden", boxShadow: "0 1px 6px rgba(0,0,0,.35)", border: "1px solid rgba(255,255,255,.12)" }}
+                    title={p.n || ""}
+                  >
+                    <img src={p.u} alt={p.n || ""} loading="lazy" style={{ display: "block", width: "100%", height: 72, objectFit: "cover" }} />
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -791,6 +772,12 @@ export default function ClientPage() {
         .slider::-webkit-slider-thumb { appearance: none; width: 14px; height: 14px; border-radius: 50%; background: white; cursor: pointer; box-shadow: 0 0 2px black; margin-top: -5px; }
         .slider::-moz-range-track { height: 4px; background: white; border-radius: 2px; }
         .slider::-moz-range-thumb { width: 14px; height: 14px; border-radius: 50%; background: white; cursor: pointer; box-shadow: 0 0 2px black; border: none; }
+
+        /* Color input – odstranění vnitřního šedého rámečku */
+        .color-input { -webkit-appearance: none; appearance: none; }
+        .color-input::-webkit-color-swatch-wrapper { padding: 0; }
+        .color-input::-webkit-color-swatch { border: none; border-radius: 2px; }
+        .color-input::-moz-color-swatch { border: none; }
 
         @media (max-width: 720px) {
           .sidebar {
