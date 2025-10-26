@@ -61,46 +61,12 @@ function PreloadIcons() {
   return null
 }
 
-/* ---------- Error overlay (SAFE MODE) ---------- */
-function ErrorOverlay() {
-  const [err, setErr] = useState(null)
-  useEffect(() => {
-    const onError = (e) => {
-      const message = e?.message || String(e?.error || e || "Unknown error")
-      const stack = e?.error?.stack || e?.reason?.stack || ""
-      setErr({ message, stack })
-    }
-    const onRej = (e) => {
-      const message = e?.reason?.message || String(e?.reason || "Unhandled rejection")
-      const stack = e?.reason?.stack || ""
-      setErr({ message, stack })
-    }
-    window.addEventListener("error", onError)
-    window.addEventListener("unhandledrejection", onRej)
-    return () => {
-      window.removeEventListener("error", onError)
-      window.removeEventListener("unhandledrejection", onRej)
-    }
-  }, [])
-  if (!err) return null
-  return (
-    <div style={{
-      position: "fixed", left: 10, right: 10, bottom: 10, zIndex: 9999,
-      background: "rgba(200,0,0,.9)", color: "#fff", padding: "12px 14px",
-      borderRadius: 8, border: "1px solid rgba(255,255,255,.25)", fontFamily: "monospace",
-      whiteSpace: "pre-wrap", maxHeight: "50vh", overflow: "auto"
-    }}>
-      <strong>Runtime error:</strong> {err.message}
-      {err.stack ? ("\n" + err.stack) : null}
-    </div>
-  )
-}
-
 /* ---------- Auto Smooth ---------- */
 const DEFAULT_SMOOTH_ANGLE = 30
 function autoSmoothGeometry(geometry, angleDeg = DEFAULT_SMOOTH_ANGLE) {
   const angle = Math.max(0, Math.min(89.9, angleDeg))
   const angleRad = (angle * Math.PI) / 180
+
   const g = geometry.index ? geometry.toNonIndexed() : geometry.clone()
   const pos = g.getAttribute("position")
   const vCount = pos.count
@@ -157,7 +123,7 @@ function autoSmoothGeometry(geometry, angleDeg = DEFAULT_SMOOTH_ANGLE) {
   return g
 }
 
-/* ---------- Loader overlay ---------- */
+/* ---------- Loader (overlay) ---------- */
 function InlineLoader({ text }) {
   return (
     <Html center>
@@ -168,7 +134,7 @@ function InlineLoader({ text }) {
   )
 }
 
-/* ---------- Model ---------- */
+/* ---------- AnyModel ---------- */
 function AnyModel({
   name, url,
   color, opacity, visible,
@@ -256,6 +222,7 @@ function AnyModel({
     return () => { cancelled = true }
   }, [url, ext])
 
+  // Re-smoothing – bez resetu kamery
   useEffect(() => {
     if (!object3D) return
     object3D.traverse((child) => {
@@ -273,6 +240,7 @@ function AnyModel({
     })
   }, [object3D, autoSmooth])
 
+  // Materiály
   useEffect(() => {
     if (!object3D) return
     object3D.traverse((child) => {
@@ -313,7 +281,7 @@ function Headlight({ enabled = true, intensity = 2, color = "#ffffff" }) {
   return <pointLight ref={ref} color={color} intensity={enabled ? intensity : 0} distance={0} decay={0} />
 }
 
-/* ---------- Trackball (rotace/zoom) ---------- */
+/* ---------- Trackball (rotace/zoom, bez pravého tlačítka) ---------- */
 function TouchTrackballControls({ target = [0, 0, 0] }) {
   const { camera, gl, size } = useThree()
   const controlsRef = useRef(null)
@@ -325,22 +293,16 @@ function TouchTrackballControls({ target = [0, 0, 0] }) {
     controls.panSpeed = 1.0
     controls.staticMoving = true
     controls.dynamicDampingFactor = 0.15
-    // ⚠️ Vypneme pravé tlačítko v Trackballu – pan řešíme customem
+    // ❌ žádné pravé tlačítko – pan děláme customem
     controls.mouseButtons = {
       LEFT: THREE.MOUSE.ROTATE,
       MIDDLE: THREE.MOUSE.ZOOM,
-      // RIGHT: vypnuto
     }
     controlsRef.current = controls
 
-    const ts = (e) => { e.preventDefault(); controls.handleTouchStart(e) }
-    const tm = (e) => { e.preventDefault(); controls.handleTouchMove(e) }
-    gl.domElement.addEventListener("touchstart", ts, { passive: false })
-    gl.domElement.addEventListener("touchmove", tm, { passive: false })
+    // ❌ žádné ruční handleTouch* volání – Trackball si touch řeší interně
 
     return () => {
-      gl.domElement.removeEventListener("touchstart", ts)
-      gl.domElement.removeEventListener("touchmove", tm)
       controls.dispose()
     }
   }, [camera, gl])
@@ -366,7 +328,7 @@ function TouchTrackballControls({ target = [0, 0, 0] }) {
   return null
 }
 
-/* ---------- Vlastní pan (pravé tlačítko) – screen-space, 1:1 ---------- */
+/* ---------- Vlastní pan (pravé tlačítko / Ctrl+levé) ---------- */
 function RightButtonPan({ setTarget }) {
   const { camera, gl, size } = useThree()
   const isPanning = useRef(false)
@@ -526,6 +488,7 @@ export default function ClientPage() {
   const [photos, setPhotos] = useState([])
   const [lightbox, setLightbox] = useState({ open: false, src: null, alt: "" })
 
+  // Fotky: na mobilu výchozí stav sbaleno, na desktopu otevřeno
   const [photosOpen, setPhotosOpen] = useState(!isMobile)
   useEffect(() => { setPhotosOpen(!isMobile) }, [isMobile])
 
@@ -818,7 +781,6 @@ export default function ClientPage() {
   return (
     <div className="stage" style={{ position: "relative", width: "100vw", height: "100vh", background: "black" }}>
       <PreloadIcons />
-      <ErrorOverlay />
       {logoEl}
       {sidebar}
 
@@ -853,6 +815,7 @@ export default function ClientPage() {
               </Suspense>
             </group>
 
+            {/* Centering & framing jako ve funkční verzi */}
             <AutoCenterAndFrame
               rootRef={rootRef}
               depsKey={loadedCount === files.length ? `ready-${files.length}` : `loading-${loadedCount}`}
@@ -864,7 +827,6 @@ export default function ClientPage() {
               centerMode={"combined"}
             />
             <TouchTrackballControls target={cameraTarget} />
-            {/* ✅ pravé tlačítko pan */}
             <RightButtonPan setTarget={setCameraTarget} />
           </>
         )}
@@ -895,6 +857,70 @@ export default function ClientPage() {
       `}</style>
     </div>
   )
+}
+
+/* ---------- AutoCenter & AutoFrame ---------- */
+function AutoCenterAndFrame({
+  rootRef, depsKey, setTarget,
+  margin = 1.2, isMobile = false, desktopScale = 0.4, mobileScale = 1.0,
+  centerMode = "combined",
+}) {
+  const { camera, size } = useThree()
+
+  useEffect(() => {
+    const root = rootRef.current
+    if (!root) return
+
+    root.updateMatrixWorld(true)
+    const boxAll = new THREE.Box3().setFromObject(root)
+    if (boxAll.isEmpty()) return
+
+    const centerAll = new THREE.Vector3()
+    const dims = new THREE.Vector3()
+    boxAll.getCenter(centerAll)
+    boxAll.getSize(dims)
+
+    if (centerMode === "per") {
+      root.children.forEach((child) => {
+        const b = new THREE.Box3().setFromObject(child)
+        if (b.isEmpty()) return
+        const cWorld = new THREE.Vector3()
+        b.getCenter(cWorld)
+        child.position.sub(cWorld)
+      })
+      root.updateMatrixWorld(true)
+      setTarget([0, 0, 0])
+    } else if (centerMode === "combined") {
+      root.position.sub(centerAll)
+      root.updateMatrixWorld(true)
+      setTarget([0, 0, 0])
+    } else {
+      setTarget([centerAll.x, centerAll.y, centerAll.z])
+    }
+
+    const after = new THREE.Box3().setFromObject(root)
+    const dims2 = new THREE.Vector3()
+    const ctr = new THREE.Vector3()
+    after.getSize(dims2)
+    after.getCenter(ctr)
+
+    const objW = Math.max(dims2.x, 1e-6)
+    const objH = Math.max(dims2.y, 1e-6)
+    const zoomX = size.width / (objW * margin)
+    const zoomY = size.height / (objH * margin)
+    let newZoom = Math.min(zoomX, zoomY)
+    newZoom *= isMobile ? mobileScale : desktopScale
+
+    const depth = Math.max(dims2.z, Math.max(dims2.x, dims2.y) * 0.75) || 1
+    const safeDist = depth * 4
+    camera.near = Math.max(0.01, safeDist * 0.001)
+    camera.far = safeDist * 50 + 100
+    camera.position.set(ctr.x, ctr.y, ctr.z + safeDist)
+    camera.zoom = Math.max(newZoom, 0.01)
+    camera.updateProjectionMatrix()
+  }, [depsKey, size.width, size.height, isMobile, desktopScale, mobileScale, margin, centerMode, setTarget])
+
+  return null
 }
 
 /* ---------- Lightbox ---------- */
