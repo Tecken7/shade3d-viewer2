@@ -14,7 +14,7 @@ import { PLYLoader } from "three/examples/jsm/loaders/PLYLoader"
 const SUPABASE_URL = "https://jqnkdjgmenerioodqcpa.supabase.co"
 const PUBLIC_BUCKET = "shade3d-viewer2"
 
-/* ---------- Ikony + preload (jen oko) ---------- */
+/* ---------- Ikony + preload ---------- */
 const ICONS = {
   eye: "/icons/Eye.png",
   eyeOff: "/icons/Eye-off.png",
@@ -55,7 +55,6 @@ const DEFAULT_SMOOTH_ANGLE = 30
 function autoSmoothGeometry(geometry, angleDeg = DEFAULT_SMOOTH_ANGLE) {
   const angle = Math.max(0, Math.min(89.9, angleDeg))
   const angleRad = (angle * Math.PI) / 180
-
   const g = geometry.index ? geometry.toNonIndexed() : geometry.clone()
   const pos = g.getAttribute("position")
   const vCount = pos.count
@@ -168,11 +167,9 @@ function AnyModel({
           let base = geom
           if (autoSmooth) base = autoSmoothGeometry(geom, smoothAngle)
           else if (!geom.attributes.normal) geom.computeVertexNormals()
-
           const mat = hasVC && useVertexColors
             ? makeMat({ vertexColors: true, color: new THREE.Color("#ffffff") })
             : makeMat()
-
           obj = new THREE.Mesh(base, mat)
           obj.userData._baseGeom = geom
           obj.userData._derivedGeom = base
@@ -262,7 +259,7 @@ function AnyModel({
   return visible ? <primitive object={object3D} /> : null
 }
 
-/* ---------- Headlight (PointLight následující kameru) ---------- */
+/* ---------- Headlight ---------- */
 function Headlight({ enabled = true, intensity = 2, color = "#ffffff" }) {
   const { camera } = useThree()
   const ref = useRef(null)
@@ -285,7 +282,7 @@ function TouchTrackballControls({ target = [0, 0, 0] }) {
     controls.mouseButtons = {
       LEFT: THREE.MOUSE.ROTATE,
       MIDDLE: THREE.MOUSE.ZOOM,
-      RIGHT: THREE.MOUSE.ROTATE,
+      RIGHT: THREE.MOUSE.ROTATE, // pan řešíme customem níže
     }
     controlsRef.current = controls
 
@@ -322,55 +319,91 @@ function TouchTrackballControls({ target = [0, 0, 0] }) {
   return null
 }
 
-/* ---------- ColorSwatch (react-colorful popover) ---------- */
-function ColorSwatch({ color, onChange, ariaLabel }) {
-  const [open, setOpen] = useState(false)
-  const containerRef = useRef(null)
+/* ---------- Pravé tlačítko: screen-space pan (1:1) ---------- */
+function RightButtonPan({ setTarget }) {
+  const { camera, gl, size } = useThree()
+  const isPanning = useRef(false)
+  const last = useRef({ x: 0, y: 0 })
+  const pointerIdRef = useRef(null)
+  const PAN_SENSITIVITY = 0.85
+  const right = new THREE.Vector3()
+  const up = new THREE.Vector3()
+  const deltaWorld = new THREE.Vector3()
+
   useEffect(() => {
-    const onDocClick = (e) => { if (open && containerRef.current && !containerRef.current.contains(e.target)) setOpen(false) }
-    document.addEventListener("mousedown", onDocClick)
-    return () => document.removeEventListener("mousedown", onDocClick)
-  }, [open])
-  return (
-    <div ref={containerRef} style={{ position: "relative", display: "inline-block" }}>
-      <button
-        aria-label={ariaLabel || "color picker"}
-        onClick={() => setOpen((v) => !v)}
-        style={{
-          width: 36, height: 22, borderRadius: 4, border: "1px solid #fff",
-          background: color, cursor: "pointer", boxShadow: "0 0 0 1px rgba(0,0,0,.25) inset", padding: 0
-        }}
-      />
-      {open && (
-        <div style={{
-          position: "absolute", zIndex: 30, top: 28, left: 0,
-          background: "rgba(0,0,0,.92)", padding: 12, borderRadius: 10,
-          border: "1px solid rgba(255,255,255,.18)", backdropFilter: "blur(4px)",
-          boxShadow: "0 6px 24px rgba(0,0,0,.35)"
-        }}>
-          <HexColorPicker color={color} onChange={onChange} />
-          <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8 }}>
-            <span style={{ color: "#fff", fontSize: 12 }}>#</span>
-            <HexColorInput
-              color={color}
-              onChange={onChange}
-              prefixed={false}
-              style={{ width: 90, padding: "4px 6px", borderRadius: 6, border: "1px solid #444", background: "#111", color: "#fff", fontFamily: "monospace", fontSize: 12 }}
-            />
-          </div>
-        </div>
-      )}
-    </div>
-  )
+    const el = gl.domElement
+
+    const onContext = (e) => { e.preventDefault() }
+
+    const onDown = (e) => {
+      // pravé tlačítko nebo Ctrl+Left
+      if ((e.button !== 2) && !(e.button === 0 && e.ctrlKey)) return
+      e.preventDefault()
+      isPanning.current = true
+      last.current = { x: e.clientX, y: e.clientY }
+      pointerIdRef.current = e.pointerId
+      try { el.setPointerCapture?.(e.pointerId) } catch {}
+    }
+
+    const onMove = (e) => {
+      if (!isPanning.current) return
+      e.preventDefault()
+      const dx = e.clientX - last.current.x
+      const dy = e.clientY - last.current.y
+      last.current = { x: e.clientX, y: e.clientY }
+
+      right.setFromMatrixColumn(camera.matrixWorld, 0).normalize()
+      up.setFromMatrixColumn(camera.matrixWorld, 1).normalize()
+
+      if (camera.isOrthographicCamera) {
+        const wppX = ((camera.right - camera.left) / (size.width * camera.zoom))
+        const wppY = ((camera.top - camera.bottom) / (size.height * camera.zoom))
+        const moveRight = -dx * wppX * PAN_SENSITIVITY
+        const moveUp    =  dy * wppY * PAN_SENSITIVITY
+        deltaWorld.copy(right).multiplyScalar(moveRight).addScaledVector(up, moveUp)
+        camera.position.add(deltaWorld)
+        setTarget?.((t) => [t[0] + deltaWorld.x, t[1] + deltaWorld.y, t[2] + deltaWorld.z])
+        camera.updateProjectionMatrix()
+      } else {
+        const dist = camera.position.length()
+        const scale = (dist / Math.max(size.width, size.height)) * PAN_SENSITIVITY
+        deltaWorld.copy(right).multiplyScalar(-dx * scale).addScaledVector(up, dy * scale)
+        camera.position.add(deltaWorld)
+        setTarget?.((t) => [t[0] + deltaWorld.x, t[1] + deltaWorld.y, t[2] + deltaWorld.z])
+      }
+    }
+
+    const onUp = () => {
+      if (!isPanning.current) return
+      isPanning.current = false
+      try { el.releasePointerCapture?.(pointerIdRef.current) } catch {}
+      pointerIdRef.current = null
+    }
+
+    el.addEventListener("contextmenu", onContext)
+    el.addEventListener("pointerdown", onDown)
+    window.addEventListener("pointermove", onMove)
+    window.addEventListener("pointerup", onUp)
+
+    return () => {
+      el.removeEventListener("contextmenu", onContext)
+      el.removeEventListener("pointerdown", onDown)
+      window.removeEventListener("pointermove", onMove)
+      window.removeEventListener("pointerup", onUp)
+    }
+  }, [camera, gl, size.width, size.height, setTarget])
+
+  return null
 }
 
-/* ---------- AutoCenter & AutoFrame ---------- */
+/* ---------- AutoCenter & AutoFrame (bez reframu na resize) ---------- */
 function AutoCenterAndFrame({
   rootRef, depsKey, setTarget,
   margin = 1.2, isMobile = false, desktopScale = 0.4, mobileScale = 1.0,
   centerMode = "combined",
 }) {
-  const { camera, size } = useThree()
+  const { camera } = useThree()
+
   useEffect(() => {
     const root = rootRef.current
     if (!root) return
@@ -410,22 +443,22 @@ function AutoCenterAndFrame({
 
     const objW = Math.max(dims2.x, 1e-6)
     const objH = Math.max(dims2.y, 1e-6)
-    const zoomX = size.width / (objW * margin)
-    const zoomY = size.height / (objH * margin)
+    const zoomX = window.innerWidth / (objW * margin)
+    const zoomY = window.innerHeight / (objH * margin)
     let newZoom = Math.min(zoomX, zoomY)
     newZoom *= isMobile ? mobileScale : desktopScale
 
     camera.near = 0.01
     camera.far = 100000
     camera.zoom = Math.max(newZoom, 0.01)
-    camera.position.set(ctr.x, ctr.y, ctr.z + Math.abs(camera.position.z))
+    camera.position.set(ctr.x, ctr.y, ctr.z + Math.abs(camera.position.z || Math.max(dims2.z * 4, 100)))
     camera.updateProjectionMatrix()
-  }, [depsKey, size.width, size.height, isMobile, desktopScale, mobileScale, margin, centerMode, setTarget])
+  }, [depsKey, isMobile, desktopScale, mobileScale, margin, centerMode, setTarget])
 
   return null
 }
 
-/* ---------- Lightbox pro fotky ---------- */
+/* ---------- Lightbox ---------- */
 function Lightbox({ open, onClose, src, alt }) {
   if (!open || !src) return null
   return (
@@ -468,7 +501,6 @@ export default function ClientPage() {
   const [photos, setPhotos] = useState([])
   const [lightbox, setLightbox] = useState({ open: false, src: null, alt: "" })
 
-  // Fotky: na mobilu sbaleno, na desktopu otevřeno
   const [photosOpen, setPhotosOpen] = useState(!isMobile)
   useEffect(() => { setPhotosOpen(!isMobile) }, [isMobile])
 
@@ -684,7 +716,7 @@ export default function ClientPage() {
                   aria-label={`${f.name} opacity`}
                 />
 
-                {/* Oko – PNG z /public/icons */}
+                {/* Ikona oka */}
                 <button
                   className={`toggle icon-btn ${visibles[i] ? "is-on" : "is-off"}`}
                   onClick={() => setVisibles((prev) => prev.map((v, idx) => (idx === i ? !v : v)))}
@@ -724,7 +756,7 @@ export default function ClientPage() {
         )}
       </div>
 
-      {/* Fotky – šipka ZŮSTÁVÁ jako dřív (rotace) */}
+      {/* Fotky – šipka zůstává, rotuje při otevření */}
       {photos && photos.length > 0 && (
         <div style={{ marginTop: 10 }}>
           <button
@@ -826,6 +858,7 @@ export default function ClientPage() {
               centerMode={centerMode}
             />
             <TouchTrackballControls target={cameraTarget} />
+            <RightButtonPan setTarget={setCameraTarget} />
           </>
         )}
       </Canvas>
