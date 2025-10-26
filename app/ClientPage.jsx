@@ -9,7 +9,7 @@ import { OBJLoader } from "three/examples/jsm/loaders/OBJLoader"
 import { STLLoader } from "three/examples/jsm/loaders/STLLoader"
 import { PLYLoader } from "three/examples/jsm/loaders/PLYLoader"
 
-/* ---------- Konfigurace pro ?m= ---------- */
+/* ---------- Konfigurace ---------- */
 const SUPABASE_URL = "https://jqnkdjgmenerioodqcpa.supabase.co"
 const PUBLIC_BUCKET = "shade3d-viewer2"
 
@@ -20,13 +20,50 @@ const ICONS = {
 }
 function PreloadIcons() {
   useEffect(() => {
-    Object.values(ICONS).forEach((src) => {
-      const img = new Image()
-      img.decoding = "async"
-      img.src = src
-    })
+    try {
+      Object.values(ICONS).forEach((src) => {
+        const img = new Image()
+        img.decoding = "async"
+        img.src = src
+      })
+    } catch {}
   }, [])
   return null
+}
+
+/* ---------- Error overlay (SAFE MODE) ---------- */
+function ErrorOverlay() {
+  const [err, setErr] = useState(null)
+  useEffect(() => {
+    const onError = (e) => {
+      const message = e?.message || String(e?.error || e || "Unknown error")
+      const stack = e?.error?.stack || e?.reason?.stack || ""
+      setErr({ message, stack })
+    }
+    const onRej = (e) => {
+      const message = e?.reason?.message || String(e?.reason || "Unhandled rejection")
+      const stack = e?.reason?.stack || ""
+      setErr({ message, stack })
+    }
+    window.addEventListener("error", onError)
+    window.addEventListener("unhandledrejection", onRej)
+    return () => {
+      window.removeEventListener("error", onError)
+      window.removeEventListener("unhandledrejection", onRej)
+    }
+  }, [])
+  if (!err) return null
+  return (
+    <div style={{
+      position: "fixed", left: 10, right: 10, bottom: 10, zIndex: 9999,
+      background: "rgba(200,0,0,.9)", color: "#fff", padding: "12px 14px",
+      borderRadius: 8, border: "1px solid rgba(255,255,255,.25)", fontFamily: "monospace",
+      whiteSpace: "pre-wrap", maxHeight: "50vh", overflow: "auto"
+    }}>
+      <strong>Runtime error:</strong> {err.message}
+      {err.stack ? ("\n" + err.stack) : null}
+    </div>
+  )
 }
 
 /* ---------- Helpers ---------- */
@@ -35,7 +72,11 @@ const stripExt = (s) => (s ? s.replace(/\.[^.]+$/, "") : "")
 const clamp01 = (x) => Math.max(0, Math.min(1, x))
 const getParam = (name) => {
   if (typeof window === "undefined") return null
-  return new URL(window.location.href).searchParams.get(name)
+  try {
+    return new URL(window.location.href).searchParams.get(name)
+  } catch {
+    return null
+  }
 }
 async function fetchJSON(url) {
   const r = await fetch(url, { cache: "no-store" })
@@ -54,7 +95,6 @@ const DEFAULT_SMOOTH_ANGLE = 30
 function autoSmoothGeometry(geometry, angleDeg = DEFAULT_SMOOTH_ANGLE) {
   const angle = Math.max(0, Math.min(89.9, angleDeg))
   const angleRad = (angle * Math.PI) / 180
-
   const g = geometry.index ? geometry.toNonIndexed() : geometry.clone()
   const pos = g.getAttribute("position")
   const vCount = pos.count
@@ -111,7 +151,7 @@ function autoSmoothGeometry(geometry, angleDeg = DEFAULT_SMOOTH_ANGLE) {
   return g
 }
 
-/* ---------- Loader (overlay) ---------- */
+/* ---------- Loader overlay ---------- */
 function InlineLoader({ text }) {
   return (
     <Html center>
@@ -122,7 +162,7 @@ function InlineLoader({ text }) {
   )
 }
 
-/* ---------- AnyModel ---------- */
+/* ---------- Model ---------- */
 function AnyModel({
   name, url,
   color, opacity, visible,
@@ -203,14 +243,14 @@ function AnyModel({
           onLoaded && onLoaded(obj)
         }
       } catch (e) {
-        if (!cancelled) setLoading(false)
         console.error("Model load error:", e)
+        if (!cancelled) setLoading(false)
+        // necháme scénu dál běžet
       }
     })()
     return () => { cancelled = true }
   }, [url, ext])
 
-  // Re-smoothing – bez resetu kamery
   useEffect(() => {
     if (!object3D) return
     object3D.traverse((child) => {
@@ -228,7 +268,6 @@ function AnyModel({
     })
   }, [object3D, autoSmooth])
 
-  // Materiály
   useEffect(() => {
     if (!object3D) return
     object3D.traverse((child) => {
@@ -321,7 +360,7 @@ function TouchTrackballControls({ target = [0, 0, 0] }) {
   return null
 }
 
-/* ---------- AutoCenter & AutoFrame (DOPLNĚNO) ---------- */
+/* ---------- AutoCenter & AutoFrame ---------- */
 function AutoCenterAndFrame({
   rootRef, depsKey, setTarget,
   margin = 1.2, isMobile = false, desktopScale = 0.4, mobileScale = 1.0,
@@ -439,10 +478,12 @@ export default function ClientPage() {
 
   const [isMobile, setIsMobile] = useState(false)
   useEffect(() => {
-    const uaMobile = /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent)
-    const coarse = typeof window !== "undefined" && window.matchMedia && window.matchMedia("(pointer: coarse)").matches
-    const narrow = typeof window !== "undefined" && window.innerWidth < 768
-    setIsMobile(uaMobile || coarse || narrow)
+    try {
+      const uaMobile = /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent)
+      const coarse = typeof window !== "undefined" && window.matchMedia && window.matchMedia("(pointer: coarse)").matches
+      const narrow = typeof window !== "undefined" && window.innerWidth < 768
+      setIsMobile(uaMobile || coarse || narrow)
+    } catch {}
   }, [])
 
   const [title, setTitle] = useState(null)
@@ -461,7 +502,6 @@ export default function ClientPage() {
   const [photos, setPhotos] = useState([])
   const [lightbox, setLightbox] = useState({ open: false, src: null, alt: "" })
 
-  // Fotky: na mobilu výchozí stav sbaleno, na desktopu otevřeno
   const [photosOpen, setPhotosOpen] = useState(!isMobile)
   useEffect(() => { setPhotosOpen(!isMobile) }, [isMobile])
 
@@ -480,10 +520,10 @@ export default function ClientPage() {
           const m = await fetchJSON(manifestUrl)
           const Fs = (m?.files || []).map((x, i) => ({
             url: x.u, name: stripExt(x.n) || `Model ${i + 1}`, rawName: x.n,
-            c: x.c, o: typeof x.o === "number" ? x.o : 1,
+            c: x.c, o: typeof x.o === "number" ? clamp01(x.o) : 1,
             v: typeof x.v === "boolean" ? x.v : true,
-            r: typeof x.r === "number" ? x.r : 0.5,
-            m: typeof x.m === "number" ? x.m : 0.5,
+            r: typeof x.r === "number" ? clamp01(x.r) : 0.5,
+            m: typeof x.m === "number" ? clamp01(x.m) : 0.5,
             vc: !!x.vc, km: !!x.km,
           }))
           if (!Fs.length) throw new Error("Manifest je prázdný.")
@@ -516,10 +556,10 @@ export default function ClientPage() {
           const m = await fetchJSON(manifestUrlParam)
           const Fs = (m?.files || []).map((x, i) => ({
             url: x.u, name: stripExt(x.n) || `Model ${i + 1}`, rawName: x.n,
-            c: x.c, o: typeof x.o === "number" ? x.o : 1,
+            c: x.c, o: typeof x.o === "number" ? clamp01(x.o) : 1,
             v: typeof x.v === "boolean" ? x.v : true,
-            r: typeof x.r === "number" ? x.r : 0.5,
-            m: typeof x.m === "number" ? x.m : 0.5,
+            r: typeof x.r === "number" ? clamp01(x.r) : 0.5,
+            m: typeof x.m === "number" ? clamp01(x.m) : 0.5,
             vc: !!x.vc, km: !!x.km,
           }))
           if (!Fs.length) throw new Error("Manifest je prázdný.")
@@ -580,7 +620,7 @@ export default function ClientPage() {
           return
         }
 
-        // dev fallback
+        // dev fallback (necháme prázdné, pokud nechceš demo data, zruš blok)
         const Fs = [
           { url: "/models/Upper.obj", name: "Upper", rawName: "Upper.obj", r: 0.5, m: 0.5, v: true, vc: false, km: false },
           { url: "/models/Lower.stl", name: "Lower", rawName: "Lower.stl", r: 0.5, m: 0.5, v: true, vc: false, km: false },
@@ -650,26 +690,18 @@ export default function ClientPage() {
             )}
 
             {files.map((f, i) => (
-              <div key={i} className="control-row" style={{ display: "grid", gridTemplateColumns: "36px 1fr 36px", alignItems: "center", columnGap: 6, rowGap: 6, margin: "6px 0" }}>
+              <div key={`${f.url}-${i}`} className="control-row" style={{ display: "grid", gridTemplateColumns: "36px 1fr 36px", alignItems: "center", columnGap: 6, rowGap: 6, margin: "6px 0" }}>
                 <div className="row-label" style={{ gridColumn: "1 / -1", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={f.rawName || f.name}>
                   {stripExt(f.name)}:
                 </div>
 
-                {/* Color picker (stejná výška/šířka jako oko) */}
                 <input
                   type="color"
                   value={colors[i] ?? "#ffffff"}
                   onChange={(e) => setColors((prev) => prev.map((v, idx) => (idx === i ? e.target.value : v)))}
                   aria-label={`${f.name} color`}
                   className="color-input"
-                  style={{
-                    width: 36, height: 22,
-                    border: "1px solid #fff",
-                    borderRadius: 4,
-                    padding: 0,
-                    cursor: "pointer",
-                    background: "transparent",
-                  }}
+                  style={{ width: 36, height: 22, border: "1px solid #fff", borderRadius: 4, padding: 0, cursor: "pointer", background: "transparent" }}
                 />
 
                 <input
@@ -681,7 +713,6 @@ export default function ClientPage() {
                   aria-label={`${f.name} opacity`}
                 />
 
-                {/* Oko – stejná krabička jako color input */}
                 <button
                   className={`toggle icon-btn ${visibles[i] ? "is-on" : "is-off"}`}
                   onClick={() => setVisibles((prev) => prev.map((v, idx) => (idx === i ? !v : v)))}
@@ -698,7 +729,7 @@ export default function ClientPage() {
                   }}
                 >
                   <img
-                    src={visibles[i] ? ICONS.eye : ICONS.eyeOff}
+                    src={(visibles[i] ?? true) ? ICONS.eye : ICONS.eyeOff}
                     alt=""
                     width={14}
                     height={14}
@@ -738,31 +769,16 @@ export default function ClientPage() {
             }}
           >
             <span>Fotky ({photos.length})</span>
-            <svg
-              width="18" height="18" viewBox="0 0 24 24" fill="none"
-              style={{ transform: photosOpen ? "rotate(90deg)" : "rotate(0deg)", transition: "transform .15s ease" }}
-              aria-hidden
-            >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" style={{ transform: photosOpen ? "rotate(90deg)" : "rotate(0deg)", transition: "transform .15s ease" }} aria-hidden>
               <path d="M8 5l8 7-8 7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
             </svg>
           </button>
 
           {photosOpen && (
             <div style={{ marginTop: 8, border: "1px solid rgba(255,255,255,.15)", borderRadius: 10, background: "rgba(255,255,255,.06)", padding: 8 }}>
-              <div
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "repeat(auto-fill, minmax(72px, 1fr))",
-                  gap: 8,
-                }}
-              >
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(72px, 1fr))", gap: 8 }}>
                 {photos.map((p, i) => (
-                  <button
-                    key={i}
-                    onClick={() => setLightbox({ open: true, src: p.u, alt: p.n || `Photo ${i+1}` })}
-                    style={{ padding: 0, margin: 0, border: "none", background: "transparent", cursor: "pointer", borderRadius: 8, overflow: "hidden", boxShadow: "0 1px 6px rgba(0,0,0,.35)", border: "1px solid rgba(255,255,255,.12)" }}
-                    title={p.n || ""}
-                  >
+                  <button key={i} onClick={() => setLightbox({ open: true, src: p.u, alt: p.n || `Photo ${i+1}` })} style={{ padding: 0, margin: 0, border: "none", background: "transparent", cursor: "pointer", borderRadius: 8, overflow: "hidden", boxShadow: "0 1px 6px rgba(0,0,0,.35)", border: "1px solid rgba(255,255,255,.12)" }} title={p.n || ""}>
                     <img src={p.u} alt={p.n || ""} loading="lazy" style={{ display: "block", width: "100%", height: 72, objectFit: "cover" }} />
                   </button>
                 ))}
@@ -777,6 +793,7 @@ export default function ClientPage() {
   return (
     <div className="stage" style={{ position: "relative", width: "100vw", height: "100vh", background: "black" }}>
       <PreloadIcons />
+      <ErrorOverlay />
       {logoEl}
       {sidebar}
 
@@ -794,7 +811,7 @@ export default function ClientPage() {
               <Suspense fallback={null}>
                 {files.map((f, i) => (
                   <AnyModel
-                    key={i}
+                    key={`${f.url}-${i}`}
                     name={f.rawName || f.name}
                     url={f.url}
                     color={colors[i] ?? "#ffffff"}
@@ -826,8 +843,6 @@ export default function ClientPage() {
         )}
       </Canvas>
 
-      <PreloadIcons />
-
       <Lightbox open={lightbox.open} onClose={() => setLightbox({ open: false, src: null, alt: "" })} src={lightbox.src} alt={lightbox.alt} />
 
       <style jsx global>{`
@@ -851,6 +866,16 @@ export default function ClientPage() {
           }
         }
       `}</style>
+    </div>
+  )
+}
+
+/* ---------- Lightbox ---------- */
+function Lightbox({ open, onClose, src, alt }) {
+  if (!open || !src) return null
+  return (
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.85)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50 }}>
+      <img src={src} alt={alt || ""} style={{ maxWidth: "96vw", maxHeight: "92vh", objectFit: "contain", borderRadius: 12, boxShadow: "0 10px 40px rgba(0,0,0,.6)", border: "1px solid rgba(255,255,255,.15)" }} />
     </div>
   )
 }
