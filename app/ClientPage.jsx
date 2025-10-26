@@ -300,8 +300,6 @@ function TouchTrackballControls({ target = [0, 0, 0] }) {
     }
     controlsRef.current = controls
 
-    // ❌ žádné ruční handleTouch* volání – Trackball si touch řeší interně
-
     return () => {
       controls.dispose()
     }
@@ -492,6 +490,10 @@ export default function ClientPage() {
   const [photosOpen, setPhotosOpen] = useState(!isMobile)
   useEffect(() => { setPhotosOpen(!isMobile) }, [isMobile])
 
+  // NEW: Slidery zabalitelné na mobilu (stejně jako fotky)
+  const [slidersOpen, setSlidersOpen] = useState(!isMobile) // NEW
+  useEffect(() => { setSlidersOpen(!isMobile) }, [isMobile]) // NEW
+
   const [cameraTarget, setCameraTarget] = useState([0, 0, 0])
   const [loadedCount, setLoadedCount] = useState(0)
   const handleModelLoaded = () => setLoadedCount((n) => n + 1)
@@ -651,6 +653,67 @@ export default function ClientPage() {
   const rootRef = useRef()
   const fillDim = headlightCfg.enabled ? 0.5 : 1
 
+  // --- Render obsahu sliderů jako jedna proměnná (snadné zabalování) --- // NEW
+  const slidersContent = fatal ? (
+    <div style={{ color: "#ff8b8b" }}>{fatal}</div>
+  ) : (
+    <>
+      {files.map((f, i) => (
+        <div key={`${f.url}-${i}`} className="control-row" style={{ display: "grid", gridTemplateColumns: "36px 1fr 36px", alignItems: "center", columnGap: 6, rowGap: 6, margin: "6px 0" }}>
+          <div className="row-label" style={{ gridColumn: "1 / -1", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={f.rawName || f.name}>
+            {stripExt(f.name)}:
+          </div>
+
+          <input
+            type="color"
+            value={colors[i] ?? "#ffffff"}
+            onChange={(e) => setColors((prev) => prev.map((v, idx) => (idx === i ? e.target.value : v)))}
+            aria-label={`${f.name} color`}
+            className="color-input"
+            style={{ width: 36, height: 22, border: "1px solid #fff", borderRadius: 4, padding: 0, cursor: "pointer", background: "transparent" }}
+          />
+
+          <input
+            className="slider"
+            type="range" min={0} max={1} step={0.01}
+            value={opacities[i] ?? 1}
+            onChange={(e) => { const v = parseFloat(e.target.value); setOpacities((prev) => prev.map((x, idx) => (idx === i ? v : x))) }}
+            style={{ width: "calc(100% - 18px)", minWidth: 140 }}
+            aria-label={`${f.name} opacity`}
+          />
+
+          <button
+            className={`toggle icon-btn ${visibles[i] ? "is-on" : "is-off"}`}
+            onClick={() => setVisibles((prev) => prev.map((v, idx) => (idx === i ? !v : v)))}
+            aria-label={visibles[i] ? `Hide ${f.name}` : `Show ${f.name}`}
+            title={visibles[i] ? "Skrýt" : "Zobrazit"}
+            style={{
+              width: 36, height: 22,
+              display: "inline-flex", alignItems: "center", justifyContent: "center",
+              padding: 0, margin: 0,
+              background: "transparent",
+              border: "1px solid #fff",
+              borderRadius: 4,
+              cursor: "pointer",
+            }}
+          >
+            <img
+              src={(visibles[i] ?? true) ? ICONS.eye : ICONS.eyeOff}
+              alt=""
+              width={14}
+              height={14}
+              style={{ display: "block", pointerEvents: "none", userSelect: "none" }}
+            />
+          </button>
+        </div>
+      ))}
+
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 10 }}>
+        <Switch checked={autoSmooth} onChange={setAutoSmooth} label="Auto smooth" />
+      </div>
+    </>
+  )
+
   const sidebar = (
     <div
       className="sidebar"
@@ -666,75 +729,70 @@ export default function ClientPage() {
         maxHeight: "calc(100vh - 20px)", overflowY: "auto",
       }}
     >
-      <div style={{ border: "1px solid rgba(255,255,255,.15)", borderRadius: 10, padding: 10, background: "rgba(255,255,255,.06)" }}>
-        {fatal ? (
-          <div style={{ color: "#ff8b8b" }}>{fatal}</div>
-        ) : (
+      {/* NEW: Titulek mimo ohraničení slider panelu */}
+      {title && (
+        <div
+          title={title}
+          style={{
+            marginBottom: 10,
+            padding: "10px 12px",
+            borderRadius: 10,
+            border: "1px solid rgba(255,255,255,.18)",
+            background: "rgba(255,255,255,.08)",
+            fontSize: 13,
+            fontWeight: 700,
+            whiteSpace: "nowrap",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+          }}
+        >
+          {title}
+        </div>
+      )}
+
+      {/* NEW: Slidery – na mobilu zabalitelné stejně jako Fotky */}
+      <div>
+        {isMobile ? (
           <>
-            {title && (
-              <div title={title} style={{ marginBottom: 8, padding: "6px 10px", borderRadius: 8, border: "1px solid rgba(255,255,255,.18)", background: "rgba(255,255,255,.08)", fontSize: 13, fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                {title}
+            <button
+              onClick={() => setSlidersOpen((o) => !o)}
+              aria-expanded={slidersOpen}
+              style={{
+                width: "100%",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: 10,
+                padding: "10px 12px",
+                background: "rgba(255,255,255,.08)",
+                border: "1px solid rgba(255,255,255,.18)",
+                borderRadius: 10,
+                color: "#fff",
+                cursor: "pointer",
+                fontWeight: 700,
+                fontSize: 13,
+              }}
+            >
+              <span>Nastavení modelu</span>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" style={{ transform: slidersOpen ? "rotate(90deg)" : "rotate(0deg)", transition: "transform .15s ease" }} aria-hidden>
+                <path d="M8 5l8 7-8 7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+              </svg>
+            </button>
+
+            {slidersOpen && (
+              <div style={{ marginTop: 8, border: "1px solid rgba(255,255,255,.15)", borderRadius: 10, background: "rgba(255,255,255,.06)", padding: 10 }}>
+                {slidersContent}
               </div>
             )}
-
-            {files.map((f, i) => (
-              <div key={`${f.url}-${i}`} className="control-row" style={{ display: "grid", gridTemplateColumns: "36px 1fr 36px", alignItems: "center", columnGap: 6, rowGap: 6, margin: "6px 0" }}>
-                <div className="row-label" style={{ gridColumn: "1 / -1", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={f.rawName || f.name}>
-                  {stripExt(f.name)}:
-                </div>
-
-                <input
-                  type="color"
-                  value={colors[i] ?? "#ffffff"}
-                  onChange={(e) => setColors((prev) => prev.map((v, idx) => (idx === i ? e.target.value : v)))}
-                  aria-label={`${f.name} color`}
-                  className="color-input"
-                  style={{ width: 36, height: 22, border: "1px solid #fff", borderRadius: 4, padding: 0, cursor: "pointer", background: "transparent" }}
-                />
-
-                <input
-                  className="slider"
-                  type="range" min={0} max={1} step={0.01}
-                  value={opacities[i] ?? 1}
-                  onChange={(e) => { const v = parseFloat(e.target.value); setOpacities((prev) => prev.map((x, idx) => (idx === i ? v : x))) }}
-                  style={{ width: "calc(100% - 18px)", minWidth: 140 }}
-                  aria-label={`${f.name} opacity`}
-                />
-
-                <button
-                  className={`toggle icon-btn ${visibles[i] ? "is-on" : "is-off"}`}
-                  onClick={() => setVisibles((prev) => prev.map((v, idx) => (idx === i ? !v : v)))}
-                  aria-label={visibles[i] ? `Hide ${f.name}` : `Show ${f.name}`}
-                  title={visibles[i] ? "Skrýt" : "Zobrazit"}
-                  style={{
-                    width: 36, height: 22,
-                    display: "inline-flex", alignItems: "center", justifyContent: "center",
-                    padding: 0, margin: 0,
-                    background: "transparent",
-                    border: "1px solid #fff",
-                    borderRadius: 4,
-                    cursor: "pointer",
-                  }}
-                >
-                  <img
-                    src={(visibles[i] ?? true) ? ICONS.eye : ICONS.eyeOff}
-                    alt=""
-                    width={14}
-                    height={14}
-                    style={{ display: "block", pointerEvents: "none", userSelect: "none" }}
-                  />
-                </button>
-              </div>
-            ))}
-
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 10 }}>
-              <Switch checked={autoSmooth} onChange={setAutoSmooth} label="Auto smooth" />
-            </div>
           </>
+        ) : (
+          <div style={{ border: "1px solid rgba(255,255,255,.15)", borderRadius: 10, padding: 10, background: "rgba(255,255,255,.06)" }}>
+            {slidersContent}
+          </div>
         )}
       </div>
 
-      {/* Fotky – sbalitelné na mobilu */}
+      {/* Fotky – sbalitelné na mobilu (beze změn) */}
       {photos && photos.length > 0 && (
         <div style={{ marginTop: 10 }}>
           <button
@@ -815,7 +873,6 @@ export default function ClientPage() {
               </Suspense>
             </group>
 
-            {/* Centering & framing jako ve funkční verzi */}
             <AutoCenterAndFrame
               rootRef={rootRef}
               depsKey={loadedCount === files.length ? `ready-${files.length}` : `loading-${loadedCount}`}
