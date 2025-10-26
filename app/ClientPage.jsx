@@ -13,10 +13,40 @@ import { PLYLoader } from "three/examples/jsm/loaders/PLYLoader"
 const SUPABASE_URL = "https://jqnkdjgmenerioodqcpa.supabase.co"
 const PUBLIC_BUCKET = "shade3d-viewer2"
 
-/* ---------- Ikony + preload ---------- */
+/* ---------- Helpers ---------- */
+const DEFAULT_LOGO = "/Arthetic_logo.png"
+const stripExt = (s) => (s ? s.replace(/\.[^.]+$/, "") : "")
+const clamp01 = (x) => Math.max(0, Math.min(1, x))
+const getParam = (name) => {
+  if (typeof window === "undefined") return null
+  try {
+    return new URL(window.location.href).searchParams.get(name)
+  } catch {
+    return null
+  }
+}
+async function fetchJSON(url) {
+  const r = await fetch(url, { cache: "no-store" })
+  if (!r.ok) throw new Error(`HTTP ${r.status}`)
+  return r.json()
+}
+function inferExt(nameOrUrl) {
+  if (!nameOrUrl) return ""
+  const s = nameOrUrl.split("?")[0]
+  const m = s.match(/\.([a-z0-9]+)$/i)
+  return m ? m[1].toLowerCase() : ""
+}
+
+/* ---------- Ikony (konfigurovatelný base) + preload ---------- */
+const ICON_BASE = (() => {
+  const q = getParam("iconBase")
+  if (q && /^(https?:)?\/\//i.test(q)) return q.replace(/\/+$/, "") + "/"
+  if (q && q.startsWith("/")) return q.replace(/\/+$/, "") + "/"
+  return "/icons/"
+})()
 const ICONS = {
-  eye: "/icons/Eye.png",
-  eyeOff: "/icons/Eye-off.png",
+  eye: `${ICON_BASE}Eye.png`,
+  eyeOff: `${ICON_BASE}Eye-off.png`,
 }
 function PreloadIcons() {
   useEffect(() => {
@@ -64,30 +94,6 @@ function ErrorOverlay() {
       {err.stack ? ("\n" + err.stack) : null}
     </div>
   )
-}
-
-/* ---------- Helpers ---------- */
-const DEFAULT_LOGO = "/Arthetic_logo.png"
-const stripExt = (s) => (s ? s.replace(/\.[^.]+$/, "") : "")
-const clamp01 = (x) => Math.max(0, Math.min(1, x))
-const getParam = (name) => {
-  if (typeof window === "undefined") return null
-  try {
-    return new URL(window.location.href).searchParams.get(name)
-  } catch {
-    return null
-  }
-}
-async function fetchJSON(url) {
-  const r = await fetch(url, { cache: "no-store" })
-  if (!r.ok) throw new Error(`HTTP ${r.status}`)
-  return r.json()
-}
-function inferExt(nameOrUrl) {
-  if (!nameOrUrl) return ""
-  const s = nameOrUrl.split("?")[0]
-  const m = s.match(/\.([a-z0-9]+)$/i)
-  return m ? m[1].toLowerCase() : ""
 }
 
 /* ---------- Auto Smooth ---------- */
@@ -245,7 +251,6 @@ function AnyModel({
       } catch (e) {
         console.error("Model load error:", e)
         if (!cancelled) setLoading(false)
-        // necháme scénu dál běžet
       }
     })()
     return () => { cancelled = true }
@@ -320,10 +325,11 @@ function TouchTrackballControls({ target = [0, 0, 0] }) {
     controls.panSpeed = 1.0
     controls.staticMoving = true
     controls.dynamicDampingFactor = 0.15
+    // ⚠️ Vypneme pravé tlačítko v Trackballu – pan řešíme customem
     controls.mouseButtons = {
       LEFT: THREE.MOUSE.ROTATE,
       MIDDLE: THREE.MOUSE.ZOOM,
-      RIGHT: THREE.MOUSE.ROTATE,
+      // RIGHT: vypnuto
     }
     controlsRef.current = controls
 
@@ -360,66 +366,84 @@ function TouchTrackballControls({ target = [0, 0, 0] }) {
   return null
 }
 
-/* ---------- AutoCenter & AutoFrame ---------- */
-function AutoCenterAndFrame({
-  rootRef, depsKey, setTarget,
-  margin = 1.2, isMobile = false, desktopScale = 0.4, mobileScale = 1.0,
-  centerMode = "combined",
-}) {
-  const { camera, size } = useThree()
+/* ---------- Vlastní pan (pravé tlačítko) – screen-space, 1:1 ---------- */
+function RightButtonPan({ setTarget }) {
+  const { camera, gl, size } = useThree()
+  const isPanning = useRef(false)
+  const last = useRef({ x: 0, y: 0 })
+  const pointerIdRef = useRef(null)
+
+  const PAN_SENSITIVITY = 0.85
+  const right = new THREE.Vector3()
+  const up = new THREE.Vector3()
+  const deltaWorld = new THREE.Vector3()
 
   useEffect(() => {
-    const root = rootRef.current
-    if (!root) return
+    const el = gl.domElement
 
-    root.updateMatrixWorld(true)
-    const boxAll = new THREE.Box3().setFromObject(root)
-    if (boxAll.isEmpty()) return
+    const onContext = (e) => { e.preventDefault() }
 
-    const centerAll = new THREE.Vector3()
-    const dims = new THREE.Vector3()
-    boxAll.getCenter(centerAll)
-    boxAll.getSize(dims)
-
-    if (centerMode === "per") {
-      root.children.forEach((child) => {
-        const b = new THREE.Box3().setFromObject(child)
-        if (b.isEmpty()) return
-        const cWorld = new THREE.Vector3()
-        b.getCenter(cWorld)
-        child.position.sub(cWorld)
-      })
-      root.updateMatrixWorld(true)
-      setTarget([0, 0, 0])
-    } else if (centerMode === "combined") {
-      root.position.sub(centerAll)
-      root.updateMatrixWorld(true)
-      setTarget([0, 0, 0])
-    } else {
-      setTarget([centerAll.x, centerAll.y, centerAll.z])
+    const onDown = (e) => {
+      if ((e.button !== 2) && !(e.button === 0 && e.ctrlKey)) return
+      e.preventDefault()
+      e.stopPropagation()
+      isPanning.current = true
+      last.current = { x: e.clientX, y: e.clientY }
+      pointerIdRef.current = e.pointerId
+      try { el.setPointerCapture?.(e.pointerId) } catch {}
     }
 
-    const after = new THREE.Box3().setFromObject(root)
-    const dims2 = new THREE.Vector3()
-    const ctr = new THREE.Vector3()
-    after.getSize(dims2)
-    after.getCenter(ctr)
+    const onMove = (e) => {
+      if (!isPanning.current) return
+      e.preventDefault()
+      e.stopPropagation()
 
-    const objW = Math.max(dims2.x, 1e-6)
-    const objH = Math.max(dims2.y, 1e-6)
-    const zoomX = size.width / (objW * margin)
-    const zoomY = size.height / (objH * margin)
-    let newZoom = Math.min(zoomX, zoomY)
-    newZoom *= isMobile ? mobileScale : desktopScale
+      const dx = e.clientX - last.current.x
+      const dy = e.clientY - last.current.y
+      last.current = { x: e.clientX, y: e.clientY }
 
-    const depth = Math.max(dims2.z, Math.max(dims2.x, dims2.y) * 0.75) || 1
-    const safeDist = depth * 4
-    camera.near = Math.max(0.01, safeDist * 0.001)
-    camera.far = safeDist * 50 + 100
-    camera.position.set(ctr.x, ctr.y, ctr.z + safeDist)
-    camera.zoom = Math.max(newZoom, 0.01)
-    camera.updateProjectionMatrix()
-  }, [depsKey, size.width, size.height, isMobile, desktopScale, mobileScale, margin, centerMode, setTarget])
+      right.setFromMatrixColumn(camera.matrixWorld, 0).normalize()
+      up.setFromMatrixColumn(camera.matrixWorld, 1).normalize()
+
+      if (camera.isOrthographicCamera) {
+        const wppX = ((camera.right - camera.left) / (size.width * camera.zoom))
+        const wppY = ((camera.top - camera.bottom) / (size.height * camera.zoom))
+        const moveRight = -dx * wppX * PAN_SENSITIVITY
+        const moveUp    =  dy * wppY * PAN_SENSITIVITY
+
+        deltaWorld.copy(right).multiplyScalar(moveRight).addScaledVector(up, moveUp)
+        camera.position.add(deltaWorld)
+        setTarget?.((t) => [t[0] + deltaWorld.x, t[1] + deltaWorld.y, t[2] + deltaWorld.z])
+        camera.updateProjectionMatrix()
+      } else {
+        const dist = camera.position.length()
+        const scale = (dist / Math.max(size.width, size.height)) * PAN_SENSITIVITY
+        deltaWorld.copy(right).multiplyScalar(-dx * scale).addScaledVector(up, dy * scale)
+        camera.position.add(deltaWorld)
+        setTarget?.((t) => [t[0] + deltaWorld.x, t[1] + deltaWorld.y, t[2] + deltaWorld.z])
+      }
+    }
+
+    const onUp = (e) => {
+      if (!isPanning.current) return
+      e.preventDefault()
+      e.stopPropagation()
+      isPanning.current = false
+      try { el.releasePointerCapture?.(pointerIdRef.current) } catch {}
+      pointerIdRef.current = null
+    }
+
+    el.addEventListener("contextmenu", onContext)
+    el.addEventListener("pointerdown", onDown)
+    window.addEventListener("pointermove", onMove, { capture: true })
+    window.addEventListener("pointerup", onUp, { capture: true })
+    return () => {
+      el.removeEventListener("contextmenu", onContext)
+      el.removeEventListener("pointerdown", onDown)
+      window.removeEventListener("pointermove", onMove, { capture: true })
+      window.removeEventListener("pointerup", onUp, { capture: true })
+    }
+  }, [camera, gl, size.width, size.height, setTarget])
 
   return null
 }
@@ -620,7 +644,7 @@ export default function ClientPage() {
           return
         }
 
-        // dev fallback (necháme prázdné, pokud nechceš demo data, zruš blok)
+        // dev fallback
         const Fs = [
           { url: "/models/Upper.obj", name: "Upper", rawName: "Upper.obj", r: 0.5, m: 0.5, v: true, vc: false, km: false },
           { url: "/models/Lower.stl", name: "Lower", rawName: "Lower.stl", r: 0.5, m: 0.5, v: true, vc: false, km: false },
@@ -662,6 +686,7 @@ export default function ClientPage() {
   )
 
   const rootRef = useRef()
+  const fillDim = headlightCfg.enabled ? 0.5 : 1
 
   const sidebar = (
     <div
@@ -839,6 +864,8 @@ export default function ClientPage() {
               centerMode={"combined"}
             />
             <TouchTrackballControls target={cameraTarget} />
+            {/* ✅ pravé tlačítko pan */}
+            <RightButtonPan setTarget={setCameraTarget} />
           </>
         )}
       </Canvas>
