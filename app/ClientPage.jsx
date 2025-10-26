@@ -142,6 +142,7 @@ function AnyModel({
   roughness = 0.5, metalness = 0.5,
   useVertexColors = false,
   keepMaterials = false,
+  wireframe = false,
 }) {
   const [object3D, setObject3D] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -156,6 +157,7 @@ function AnyModel({
       opacity,
       side: THREE.DoubleSide,
       depthWrite: opacity === 1,
+      wireframe: !!wireframe,
       ...opts,
     })
 
@@ -198,6 +200,7 @@ function AnyModel({
                   if ("opacity" in mat) mat.opacity = opacity
                   if ("roughness" in mat && typeof roughness === "number") mat.roughness = roughness
                   if ("metalness" in mat && typeof metalness === "number") mat.metalness = metalness
+                  if ("wireframe" in mat) mat.wireframe = !!wireframe
                 }
               }
             })
@@ -240,7 +243,7 @@ function AnyModel({
     })
   }, [object3D, autoSmooth])
 
-  // Materiály
+  // Materiály (vč. wireframe)
   useEffect(() => {
     if (!object3D) return
     object3D.traverse((child) => {
@@ -252,6 +255,7 @@ function AnyModel({
           if ("opacity" in mat) mat.opacity = opacity
           if ("roughness" in mat && typeof roughness === "number") mat.roughness = roughness
           if ("metalness" in mat && typeof metalness === "number") mat.metalness = metalness
+          if ("wireframe" in mat) mat.wireframe = !!wireframe
           if (!useVertexColors && "color" in mat && color) mat.color = new THREE.Color(color)
           if (useVertexColors && "vertexColors" in mat) {
             mat.vertexColors = true
@@ -267,7 +271,7 @@ function AnyModel({
         child.material = mat
       }
     })
-  }, [object3D, color, opacity, roughness, metalness, useVertexColors, keepMaterials])
+  }, [object3D, color, opacity, roughness, metalness, useVertexColors, keepMaterials, wireframe])
 
   if (!object3D) return loading ? <InlineLoader text={`Načítám ${name || url}`} /> : null
   return visible ? <primitive object={object3D} /> : null
@@ -293,7 +297,6 @@ function TouchTrackballControls({ target = [0, 0, 0] }) {
     controls.panSpeed = 1.0
     controls.staticMoving = true
     controls.dynamicDampingFactor = 0.15
-    // ❌ žádné pravé tlačítko – pan děláme customem
     controls.mouseButtons = {
       LEFT: THREE.MOUSE.ROTATE,
       MIDDLE: THREE.MOUSE.ZOOM,
@@ -408,7 +411,7 @@ function RightButtonPan({ setTarget }) {
   return null
 }
 
-/* ---------- Slim Switch (AutoSmooth) ---------- */
+/* ---------- Slim Switch (AutoSmooth & spol.) ---------- */
 function Switch({ checked, onChange, label }) {
   const handleKey = (e) => {
     if (e.key === "Enter" || e.key === " ") {
@@ -436,7 +439,7 @@ function Switch({ checked, onChange, label }) {
           transition: "background .15s ease, border-color .15s ease",
           outline: "none", padding: 0,
         }}
-        title={checked ? "Vypnout Auto smooth" : "Zapnout Auto smooth"}
+        title={label}
       >
         <span
           aria-hidden
@@ -481,6 +484,7 @@ export default function ClientPage() {
   const [fatal, setFatal] = useState(null)
 
   const [autoSmooth, setAutoSmooth] = useState((getParam("smooth") ?? "1") !== "0")
+  const [wireframe, setWireframe] = useState(false)
 
   const [logoCfg, setLogoCfg] = useState({ url: DEFAULT_LOGO, opacity: 0.9, width: 160, pos: "bc" })
   const [photos, setPhotos] = useState([])
@@ -490,9 +494,9 @@ export default function ClientPage() {
   const [photosOpen, setPhotosOpen] = useState(!isMobile)
   useEffect(() => { setPhotosOpen(!isMobile) }, [isMobile])
 
-  // NEW: Slidery zabalitelné na mobilu (stejně jako fotky)
-  const [slidersOpen, setSlidersOpen] = useState(!isMobile) // NEW
-  useEffect(() => { setSlidersOpen(!isMobile) }, [isMobile]) // NEW
+  // Slidery/ovládání: na mobilu sbaleno, na desktopu otevřeno
+  const [slidersOpen, setSlidersOpen] = useState(!isMobile)
+  useEffect(() => { setSlidersOpen(!isMobile) }, [isMobile])
 
   const [cameraTarget, setCameraTarget] = useState([0, 0, 0])
   const [loadedCount, setLoadedCount] = useState(0)
@@ -653,7 +657,7 @@ export default function ClientPage() {
   const rootRef = useRef()
   const fillDim = headlightCfg.enabled ? 0.5 : 1
 
-  // --- Render obsahu sliderů jako jedna proměnná (snadné zabalování) --- // NEW
+  // --- obsah sliderů jako blok (kvůli sbalování) ---
   const slidersContent = fatal ? (
     <div style={{ color: "#ff8b8b" }}>{fatal}</div>
   ) : (
@@ -708,8 +712,10 @@ export default function ClientPage() {
         </div>
       ))}
 
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 10 }}>
+      {/* Auto smooth + Wireframe v jednom řádku */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginTop: 10 }}>
         <Switch checked={autoSmooth} onChange={setAutoSmooth} label="Auto smooth" />
+        <Switch checked={wireframe} onChange={setWireframe} label="Wireframe" />
       </div>
     </>
   )
@@ -729,7 +735,7 @@ export default function ClientPage() {
         maxHeight: "calc(100vh - 20px)", overflowY: "auto",
       }}
     >
-      {/* NEW: Titulek mimo ohraničení slider panelu */}
+      {/* Titulek mimo ohraničení slider panelu */}
       {title && (
         <div
           title={title}
@@ -750,7 +756,7 @@ export default function ClientPage() {
         </div>
       )}
 
-      {/* NEW: Slidery – na mobilu zabalitelné stejně jako Fotky */}
+      {/* Slidery – na mobilu rozklikávací stejně jako Fotky */}
       <div>
         {isMobile ? (
           <>
@@ -792,7 +798,7 @@ export default function ClientPage() {
         )}
       </div>
 
-      {/* Fotky – sbalitelné na mobilu (beze změn) */}
+      {/* Fotky – sbalitelné na mobilu */}
       {photos && photos.length > 0 && (
         <div style={{ marginTop: 10 }}>
           <button
@@ -864,6 +870,7 @@ export default function ClientPage() {
                     visible={visibles[i] ?? true}
                     onLoaded={handleModelLoaded}
                     autoSmooth={autoSmooth}
+                    wireframe={wireframe}
                     roughness={roughnesses[i] ?? (typeof f.r === "number" ? f.r : 0.5)}
                     metalness={metalnesses[i] ?? (typeof f.m === "number" ? f.m : 0.5)}
                     useVertexColors={!!f.vc}
@@ -873,6 +880,7 @@ export default function ClientPage() {
               </Suspense>
             </group>
 
+            {/* Centering & framing */}
             <AutoCenterAndFrame
               rootRef={rootRef}
               depsKey={loadedCount === files.length ? `ready-${files.length}` : `loading-${loadedCount}`}
