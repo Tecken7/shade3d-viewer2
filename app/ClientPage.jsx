@@ -97,7 +97,9 @@ function autoSmoothGeometry(geometry, angleDeg = DEFAULT_SMOOTH_ANGLE) {
         const nj = localFaceNs[j]
         if (nRef.dot(nj) >= cosThresh) { nx += nj.x; ny += nj.y; nz += nj.z }
       }
-      tmp.set(nx, ny, nz).normalize()
+      tmp.set(nx, ny, nz)
+      if (tmp.lengthSq() === 0) tmp.copy(nRef)
+      tmp.normalize()
       const w = ci * 3
       normals[w] = tmp.x; normals[w + 1] = tmp.y; normals[w + 2] = tmp.z
     }
@@ -319,6 +321,70 @@ function TouchTrackballControls({ target = [0, 0, 0] }) {
   return null
 }
 
+/* ---------- AutoCenter & AutoFrame (DOPLNĚNO) ---------- */
+function AutoCenterAndFrame({
+  rootRef, depsKey, setTarget,
+  margin = 1.2, isMobile = false, desktopScale = 0.4, mobileScale = 1.0,
+  centerMode = "combined",
+}) {
+  const { camera, size } = useThree()
+
+  useEffect(() => {
+    const root = rootRef.current
+    if (!root) return
+
+    root.updateMatrixWorld(true)
+    const boxAll = new THREE.Box3().setFromObject(root)
+    if (boxAll.isEmpty()) return
+
+    const centerAll = new THREE.Vector3()
+    const dims = new THREE.Vector3()
+    boxAll.getCenter(centerAll)
+    boxAll.getSize(dims)
+
+    if (centerMode === "per") {
+      root.children.forEach((child) => {
+        const b = new THREE.Box3().setFromObject(child)
+        if (b.isEmpty()) return
+        const cWorld = new THREE.Vector3()
+        b.getCenter(cWorld)
+        child.position.sub(cWorld)
+      })
+      root.updateMatrixWorld(true)
+      setTarget([0, 0, 0])
+    } else if (centerMode === "combined") {
+      root.position.sub(centerAll)
+      root.updateMatrixWorld(true)
+      setTarget([0, 0, 0])
+    } else {
+      setTarget([centerAll.x, centerAll.y, centerAll.z])
+    }
+
+    const after = new THREE.Box3().setFromObject(root)
+    const dims2 = new THREE.Vector3()
+    const ctr = new THREE.Vector3()
+    after.getSize(dims2)
+    after.getCenter(ctr)
+
+    const objW = Math.max(dims2.x, 1e-6)
+    const objH = Math.max(dims2.y, 1e-6)
+    const zoomX = size.width / (objW * margin)
+    const zoomY = size.height / (objH * margin)
+    let newZoom = Math.min(zoomX, zoomY)
+    newZoom *= isMobile ? mobileScale : desktopScale
+
+    const depth = Math.max(dims2.z, Math.max(dims2.x, dims2.y) * 0.75) || 1
+    const safeDist = depth * 4
+    camera.near = Math.max(0.01, safeDist * 0.001)
+    camera.far = safeDist * 50 + 100
+    camera.position.set(ctr.x, ctr.y, ctr.z + safeDist)
+    camera.zoom = Math.max(newZoom, 0.01)
+    camera.updateProjectionMatrix()
+  }, [depsKey, size.width, size.height, isMobile, desktopScale, mobileScale, margin, centerMode, setTarget])
+
+  return null
+}
+
 /* ---------- Slim Switch (AutoSmooth) ---------- */
 function Switch({ checked, onChange, label }) {
   const handleKey = (e) => {
@@ -327,7 +393,7 @@ function Switch({ checked, onChange, label }) {
       onChange(!checked)
     }
   }
-  const TRACK_W = 36, TRACK_H = 22, KNOB = 18
+  const TRACK_W = 38, TRACK_H = 22, KNOB = 18
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
       {label && <span style={{ opacity: 0.85 }}>{label}</span>}
@@ -368,7 +434,7 @@ function Switch({ checked, onChange, label }) {
 
 /* ---------- Hlavní komponenta ---------- */
 export default function ClientPage() {
-  const [lightIntensity, setLightIntensity] = useState(1) // ← přidaný setter
+  const [lightIntensity] = useState(1)
   const [headlightCfg, setHeadlightCfg] = useState({ enabled: true, intensity: 2.0 })
 
   const [isMobile, setIsMobile] = useState(false)
@@ -396,7 +462,7 @@ export default function ClientPage() {
   const [lightbox, setLightbox] = useState({ open: false, src: null, alt: "" })
 
   // Fotky: na mobilu výchozí stav sbaleno, na desktopu otevřeno
-  const [photosOpen, setPhotosOpen] = useState(true)
+  const [photosOpen, setPhotosOpen] = useState(!isMobile)
   useEffect(() => { setPhotosOpen(!isMobile) }, [isMobile])
 
   const [cameraTarget, setCameraTarget] = useState([0, 0, 0])
@@ -441,7 +507,6 @@ export default function ClientPage() {
             enabled: typeof hl?.enabled === "boolean" ? hl.enabled : true,
             intensity: typeof hl?.intensity === "number" ? hl.intensity : 2.0,
           })
-          if (typeof m?.lights?.intensity === "number") setLightIntensity(m.lights.intensity)
           setPhotos(Array.isArray(m?.photos) ? m.photos.filter(p => p && p.u) : [])
           return
         }
@@ -479,8 +544,6 @@ export default function ClientPage() {
             enabled: qOn == null ? true : qOn !== "0",
             intensity: isFinite(qI) ? qI : 2.0,
           })
-          const scI = parseFloat(getParam("li") ?? "NaN")
-          if (isFinite(scI)) setLightIntensity(scI) // ← bezpečně
           setPhotos(Array.isArray(m?.photos) ? m.photos.filter(p => p && p.u) : [])
           return
         }
@@ -592,7 +655,7 @@ export default function ClientPage() {
                   {stripExt(f.name)}:
                 </div>
 
-                {/* Color picker */}
+                {/* Color picker (stejná výška/šířka jako oko) */}
                 <input
                   type="color"
                   value={colors[i] ?? "#ffffff"}
@@ -618,7 +681,7 @@ export default function ClientPage() {
                   aria-label={`${f.name} opacity`}
                 />
 
-                {/* Oko */}
+                {/* Oko – stejná krabička jako color input */}
                 <button
                   className={`toggle icon-btn ${visibles[i] ? "is-on" : "is-off"}`}
                   onClick={() => setVisibles((prev) => prev.map((v, idx) => (idx === i ? !v : v)))}
@@ -748,7 +811,6 @@ export default function ClientPage() {
               </Suspense>
             </group>
 
-            {/* Center & frame */}
             <AutoCenterAndFrame
               rootRef={rootRef}
               depsKey={loadedCount === files.length ? `ready-${files.length}` : `loading-${loadedCount}`}
@@ -763,6 +825,8 @@ export default function ClientPage() {
           </>
         )}
       </Canvas>
+
+      <PreloadIcons />
 
       <Lightbox open={lightbox.open} onClose={() => setLightbox({ open: false, src: null, alt: "" })} src={lightbox.src} alt={lightbox.alt} />
 
@@ -789,68 +853,4 @@ export default function ClientPage() {
       `}</style>
     </div>
   )
-}
-
-/* ---------- AutoCenter & AutoFrame (na konci kvůli hoistinгу) ---------- */
-function AutoCenterAndFrame({
-  rootRef, depsKey, setTarget,
-  margin = 1.2, isMobile = false, desktopScale = 0.4, mobileScale = 1.0,
-  centerMode = "combined",
-}) {
-  const { camera, size } = useThree()
-
-  useEffect(() => {
-    const root = rootRef.current
-    if (!root) return
-
-    root.updateMatrixWorld(true)
-    const boxAll = new THREE.Box3().setFromObject(root)
-    if (boxAll.isEmpty()) return
-
-    const centerAll = new THREE.Vector3()
-    const dims = new THREE.Vector3()
-    boxAll.getCenter(centerAll)
-    boxAll.getSize(dims)
-
-    if (centerMode === "per") {
-      root.children.forEach((child) => {
-        const b = new THREE.Box3().setFromObject(child)
-        if (b.isEmpty()) return
-        const cWorld = new THREE.Vector3()
-        b.getCenter(cWorld)
-        child.position.sub(cWorld)
-      })
-      root.updateMatrixWorld(true)
-      setTarget([0, 0, 0])
-    } else if (centerMode === "combined") {
-      root.position.sub(centerAll)
-      root.updateMatrixWorld(true)
-      setTarget([0, 0, 0])
-    } else {
-      setTarget([centerAll.x, centerAll.y, centerAll.z])
-    }
-
-    const after = new THREE.Box3().setFromObject(root)
-    const dims2 = new THREE.Vector3()
-    const ctr = new THREE.Vector3()
-    after.getSize(dims2)
-    after.getCenter(ctr)
-
-    const objW = Math.max(dims2.x, 1e-6)
-    const objH = Math.max(dims2.y, 1e-6)
-    const zoomX = size.width / (objW * margin)
-    const zoomY = size.height / (objH * margin)
-    let newZoom = Math.min(zoomX, zoomY)
-    newZoom *= isMobile ? mobileScale : desktopScale
-
-    const depth = Math.max(dims2.z, Math.max(dims2.x, dims2.y) * 0.75) || 1
-    const safeDist = depth * 4
-    camera.near = Math.max(0.01, safeDist * 0.001)
-    camera.far = safeDist * 50 + 100
-    camera.position.set(ctr.x, ctr.y, ctr.z + safeDist)
-    camera.zoom = Math.max(newZoom, 0.01)
-    camera.updateProjectionMatrix()
-  }, [depsKey, size.width, size.height, isMobile, desktopScale, mobileScale, margin, centerMode, setTarget])
-
-  return null
 }
