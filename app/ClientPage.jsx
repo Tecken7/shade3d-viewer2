@@ -13,6 +13,22 @@ import { PLYLoader } from "three/examples/jsm/loaders/PLYLoader"
 const SUPABASE_URL = "https://jqnkdjgmenerioodqcpa.supabase.co"
 const PUBLIC_BUCKET = "shade3d-viewer2"
 
+/* ---------- Ikony + preload ---------- */
+const ICONS = {
+  eye: "/icons/Eye.png",
+  eyeOff: "/icons/Eye-off.png",
+}
+function PreloadIcons() {
+  useEffect(() => {
+    Object.values(ICONS).forEach((src) => {
+      const img = new Image()
+      img.decoding = "async"
+      img.src = src
+    })
+  }, [])
+  return null
+}
+
 /* ---------- Helpers ---------- */
 const DEFAULT_LOGO = "/Arthetic_logo.png"
 const stripExt = (s) => (s ? s.replace(/\.[^.]+$/, "") : "")
@@ -253,7 +269,7 @@ function Headlight({ enabled = true, intensity = 2, color = "#ffffff" }) {
   return <pointLight ref={ref} color={color} intensity={enabled ? intensity : 0} distance={0} decay={0} />
 }
 
-/* ---------- Trackball (rotace/zoom s „perfektním“ feel) ---------- */
+/* ---------- Trackball (rotace/zoom) ---------- */
 function TouchTrackballControls({ target = [0, 0, 0] }) {
   const { camera, gl, size } = useThree()
   const controlsRef = useRef(null)
@@ -262,13 +278,13 @@ function TouchTrackballControls({ target = [0, 0, 0] }) {
     const controls = new TrackballControls(camera, gl.domElement)
     controls.rotateSpeed = 5.0
     controls.zoomSpeed = 1.2
-    controls.panSpeed = 1.0              // jako ve vzorovém kódu
+    controls.panSpeed = 1.0
     controls.staticMoving = true
-    controls.dynamicDampingFactor = 0.15 // lehké dojezdy jako ve vzoru
+    controls.dynamicDampingFactor = 0.15
     controls.mouseButtons = {
       LEFT: THREE.MOUSE.ROTATE,
       MIDDLE: THREE.MOUSE.ZOOM,
-      RIGHT: THREE.MOUSE.ROTATE,        // skutečný pan řešíme customem
+      RIGHT: THREE.MOUSE.ROTATE,
     }
     controlsRef.current = controls
 
@@ -291,7 +307,6 @@ function TouchTrackballControls({ target = [0, 0, 0] }) {
     c.update()
   }, [target])
 
-  // stejné jako v referenčním kódu: panSpeed škálujeme zoomem (má vliv i na feel rotace)
   useFrame(() => {
     const c = controlsRef.current
     if (!c) return
@@ -302,86 +317,6 @@ function TouchTrackballControls({ target = [0, 0, 0] }) {
   useEffect(() => {
     controlsRef.current?.handleResize()
   }, [size.width, size.height])
-
-  return null
-}
-
-/* ---------- Vlastní pan (pravé tlačítko) – screen-space, 1:1 ---------- */
-function RightButtonPan({ setTarget }) {
-  const { camera, gl, size } = useThree()
-  const isPanning = useRef(false)
-  const last = useRef({ x: 0, y: 0 })
-  const pointerIdRef = useRef(null)
-
-  // ladění rychlosti posunu
-  const PAN_SENSITIVITY = 0.85
-
-  const right = new THREE.Vector3()
-  const up = new THREE.Vector3()
-  const deltaWorld = new THREE.Vector3()
-
-  useEffect(() => {
-    const el = gl.domElement
-
-    const onContext = (e) => { e.preventDefault() }
-
-    const onDown = (e) => {
-      if ((e.button !== 2) && !(e.button === 0 && e.ctrlKey)) return
-      e.preventDefault()
-      isPanning.current = true
-      last.current = { x: e.clientX, y: e.clientY }
-      pointerIdRef.current = e.pointerId
-      try { el.setPointerCapture?.(e.pointerId) } catch {}
-    }
-
-    const onMove = (e) => {
-      if (!isPanning.current) return
-      e.preventDefault()
-      const dx = e.clientX - last.current.x
-      const dy = e.clientY - last.current.y
-      last.current = { x: e.clientX, y: e.clientY }
-
-      right.setFromMatrixColumn(camera.matrixWorld, 0).normalize()
-      up.setFromMatrixColumn(camera.matrixWorld, 1).normalize()
-
-      if (camera.isOrthographicCamera) {
-        const wppX = ((camera.right - camera.left) / (size.width * camera.zoom))
-        const wppY = ((camera.top - camera.bottom) / (size.height * camera.zoom))
-        const moveRight = -dx * wppX * PAN_SENSITIVITY
-        const moveUp    =  dy * wppY * PAN_SENSITIVITY
-
-        deltaWorld.copy(right).multiplyScalar(moveRight).addScaledVector(up, moveUp)
-        camera.position.add(deltaWorld)
-        setTarget?.((t) => [t[0] + deltaWorld.x, t[1] + deltaWorld.y, t[2] + deltaWorld.z])
-        camera.updateProjectionMatrix()
-      } else {
-        const dist = camera.position.length()
-        const scale = (dist / Math.max(size.width, size.height)) * PAN_SENSITIVITY
-        deltaWorld.copy(right).multiplyScalar(-dx * scale).addScaledVector(up, dy * scale)
-        camera.position.add(deltaWorld)
-        setTarget?.((t) => [t[0] + deltaWorld.x, t[1] + deltaWorld.y, t[2] + deltaWorld.z])
-      }
-    }
-
-    const onUp = (e) => {
-      if (!isPanning.current) return
-      e.preventDefault()
-      isPanning.current = false
-      try { el.releasePointerCapture?.(pointerIdRef.current) } catch {}
-      pointerIdRef.current = null
-    }
-
-    el.addEventListener("contextmenu", onContext)
-    el.addEventListener("pointerdown", onDown)
-    window.addEventListener("pointermove", onMove)
-    window.addEventListener("pointerup", onUp)
-    return () => {
-      el.removeEventListener("contextmenu", onContext)
-      el.removeEventListener("pointerdown", onDown)
-      window.removeEventListener("pointermove", onMove)
-      window.removeEventListener("pointerup", onUp)
-    }
-  }, [camera, gl, size.width, size.height, setTarget])
 
   return null
 }
@@ -727,12 +662,43 @@ export default function ClientPage() {
                   {stripExt(f.name)}:
                 </div>
 
-                <input type="color" value={colors[i] ?? "#ffffff"} onChange={(e) => setColors((prev) => prev.map((v, idx) => (idx === i ? e.target.value : v)))} aria-label={`${f.name} color`} style={{ width: 36, height: 22, border: "1px solid #fff", borderRadius: 4, background: colors[i] ?? "#ffffff", padding: 0, cursor: "pointer" }} />
+                <input
+                  type="color"
+                  value={colors[i] ?? "#ffffff"}
+                  onChange={(e) => setColors((prev) => prev.map((v, idx) => (idx === i ? e.target.value : v)))}
+                  aria-label={`${f.name} color`}
+                  style={{ width: 36, height: 22, border: "1px solid #fff", borderRadius: 4, background: colors[i] ?? "#ffffff", padding: 0, cursor: "pointer" }}
+                />
 
-                <input className="slider" type="range" min={0} max={1} step={0.01} value={opacities[i] ?? 1} onChange={(e) => { const v = parseFloat(e.target.value); setOpacities((prev) => prev.map((x, idx) => (idx === i ? v : x))) }} style={{ width: "calc(100% - 18px)", minWidth: 140 }} aria-label={`${f.name} opacity`} />
+                <input
+                  className="slider"
+                  type="range" min={0} max={1} step={0.01}
+                  value={opacities[i] ?? 1}
+                  onChange={(e) => { const v = parseFloat(e.target.value); setOpacities((prev) => prev.map((x, idx) => (idx === i ? v : x))) }}
+                  style={{ width: "calc(100% - 18px)", minWidth: 140 }}
+                  aria-label={`${f.name} opacity`}
+                />
 
-                <button className={`toggle icon-btn ${visibles[i] ? "is-on" : "is-off"}`} onClick={() => setVisibles((prev) => prev.map((v, idx) => (idx === i ? !v : v)))} aria-label={visibles[i] ? `Hide ${f.name}` : `Show ${f.name}`} style={{ position: "relative", width: 26, height: 22, padding: 0, display: "inline-flex", alignItems: "center", justifyContent: "center", overflow: "hidden", background: "transparent", border: "1px solid white", borderRadius: 6, color: "white", cursor: "pointer" }}>
-                  <span style={{ fontSize: 12 }}>{visibles[i] ? "👁️" : "🚫"}</span>
+                <button
+                  className={`toggle icon-btn ${visibles[i] ? "is-on" : "is-off"}`}
+                  onClick={() => setVisibles((prev) => prev.map((v, idx) => (idx === i ? !v : v)))}
+                  aria-label={visibles[i] ? `Hide ${f.name}` : `Show ${f.name}`}
+                  title={visibles[i] ? "Skrýt" : "Zobrazit"}
+                  style={{
+                    position: "relative",
+                    width: 26, height: 22, padding: 0,
+                    display: "inline-flex", alignItems: "center", justifyContent: "center",
+                    overflow: "hidden", background: "transparent",
+                    border: "1px solid white", borderRadius: 6, color: "white", cursor: "pointer"
+                  }}
+                >
+                  <img
+                    src={visibles[i] ? ICONS.eye : ICONS.eyeOff}
+                    alt=""
+                    width={14}
+                    height={14}
+                    style={{ display: "block", pointerEvents: "none", userSelect: "none" }}
+                  />
                 </button>
               </div>
             ))}
@@ -750,7 +716,12 @@ export default function ClientPage() {
           <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 8, opacity: 0.9 }}>Fotky ({photos.length})</div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(72px, 1fr))", gap: 8, border: "1px solid rgba(255,255,255,.15)", borderRadius: 10, background: "rgba(255,255,255,.06)", padding: 8 }}>
             {photos.map((p, i) => (
-              <button key={i} onClick={() => setLightbox({ open: true, src: p.u, alt: p.n || `Photo ${i+1}` })} style={{ padding: 0, margin: 0, border: "none", background: "transparent", cursor: "pointer", borderRadius: 8, overflow: "hidden", boxShadow: "0 1px 6px rgba(0,0,0,.35)", border: "1px solid rgba(255,255,255,.12)" }} title={p.n || ""}>
+              <button
+                key={i}
+                onClick={() => setLightbox({ open: true, src: p.u, alt: p.n || `Photo ${i + 1}` })}
+                style={{ padding: 0, margin: 0, border: "none", background: "transparent", cursor: "pointer", borderRadius: 8, overflow: "hidden", boxShadow: "0 1px 6px rgba(0,0,0,.35)", border: "1px solid rgba(255,255,255,.12)" }}
+                title={p.n || ""}
+              >
                 <img src={p.u} alt={p.n || ""} loading="lazy" style={{ display: "block", width: "100%", height: 72, objectFit: "cover" }} />
               </button>
             ))}
@@ -762,6 +733,7 @@ export default function ClientPage() {
 
   return (
     <div className="stage" style={{ position: "relative", width: "100vw", height: "100vh", background: "black" }}>
+      <PreloadIcons />
       {logoEl}
       {sidebar}
 
@@ -807,7 +779,6 @@ export default function ClientPage() {
               centerMode={"combined"}
             />
             <TouchTrackballControls target={cameraTarget} />
-            <RightButtonPan setTarget={setCameraTarget} />
           </>
         )}
       </Canvas>
