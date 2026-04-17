@@ -135,7 +135,7 @@ function AnyModel({
   roughness = 0.5, metalness = 0.5,
   useVertexColors = false,
   keepMaterials = false,
-  wireframe = false,            // zobrazit overlay hran (plný wireframe)
+  wireframe = false,
 }) {
   const [object3D, setObject3D] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -153,14 +153,11 @@ function AnyModel({
       ...opts,
     })
 
-  // helper: projít všemi meshi
   const forEachMesh = (obj, cb) => {
     obj?.traverse?.((child) => { if (child.isMesh) cb(child) })
   }
 
-  // vytvořit/obnovit plný wireframe overlay pro mesh
   const rebuildWireOverlay = (mesh) => {
-    // zruš starý overlay
     if (mesh.userData._edges) {
       mesh.userData._edges.geometry?.dispose?.()
       mesh.userData._edges.material?.dispose?.()
@@ -172,17 +169,14 @@ function AnyModel({
     const geom = mesh.geometry
     if (!geom) return
 
-    // ⚠️ Full wireframe – všechny hrany trojúhelníků
     const wfGeom = new THREE.WireframeGeometry(geom)
-
-    // material – černé linky, vykreslit navrch povrchu
     const wfMat = new THREE.LineBasicMaterial({
       color: 0x000000,
       depthTest: true,
       depthWrite: false,
       transparent: true,
       opacity: 0.95,
-      polygonOffset: true,         // posunout trochu k kameře (z-bias)
+      polygonOffset: true,
       polygonOffsetFactor: -2,
       polygonOffsetUnits: -2,
     })
@@ -244,7 +238,6 @@ function AnyModel({
         }
 
         if (!cancelled) {
-          // vytvoř wireframe overlay podle stavu
           forEachMesh(obj, (mesh) => rebuildWireOverlay(mesh))
           setObject3D(obj)
           setLoading(false)
@@ -258,7 +251,6 @@ function AnyModel({
     return () => { cancelled = true }
   }, [url, ext])
 
-  // Re-smoothing – po změně geometrie přegeneruj i overlay
   useEffect(() => {
     if (!object3D) return
     forEachMesh(object3D, (child) => {
@@ -274,12 +266,10 @@ function AnyModel({
       child.geometry = newGeom
       child.userData._derivedGeom = newGeom
 
-      // rebuild overlay nad novou geometrií
       rebuildWireOverlay(child)
     })
   }, [object3D, autoSmooth])
 
-  // Materiály + přepínání overlay viditelnosti
   useEffect(() => {
     if (!object3D) return
     forEachMesh(object3D, (child) => {
@@ -304,7 +294,6 @@ function AnyModel({
           : makeMat()
         child.material = mat
       }
-      // zapnout/vypnout overlay; když chybí a má být, postav ho
       if (child.userData._edges) child.userData._edges.visible = !!wireframe
       else if (wireframe) rebuildWireOverlay(child)
     })
@@ -314,7 +303,7 @@ function AnyModel({
   return visible ? <primitive object={object3D} /> : null
 }
 
-/* ---------- Headlight (PointLight následující kameru) ---------- */
+/* ---------- Headlight ---------- */
 function Headlight({ enabled = true, intensity = 2, color = "#ffffff" }) {
   const { camera } = useThree()
   const ref = useRef(null)
@@ -322,7 +311,7 @@ function Headlight({ enabled = true, intensity = 2, color = "#ffffff" }) {
   return <pointLight ref={ref} color={color} intensity={enabled ? intensity : 0} distance={0} decay={0} />
 }
 
-/* ---------- Trackball (rotace/zoom, bez pravého tlačítka) ---------- */
+/* ---------- Trackball ---------- */
 function TouchTrackballControls({ target = [0, 0, 0] }) {
   const { camera, gl, size } = useThree()
   const controlsRef = useRef(null)
@@ -364,7 +353,7 @@ function TouchTrackballControls({ target = [0, 0, 0] }) {
   return null
 }
 
-/* ---------- Vlastní pan (pravé tlačítko / Ctrl+levé) ---------- */
+/* ---------- Vlastní pan ---------- */
 function RightButtonPan({ setTarget }) {
   const { camera, gl, size } = useThree()
   const isPanning = useRef(false)
@@ -493,6 +482,32 @@ function Switch({ checked, onChange, label }) {
   )
 }
 
+/* ---------- Synchronizace kamery pro Live Mode ---------- */
+function CameraSync({ controlsTarget }) {
+  const { camera } = useThree()
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (typeof window === "undefined" || !window.parent) return
+      
+      const camData = {
+        position: [camera.position.x, camera.position.y, camera.position.z],
+        zoom: camera.zoom,
+        target: [controlsTarget[0], controlsTarget[1], controlsTarget[2]]
+      }
+
+      window.parent.postMessage({
+        type: "SHADE3D_CAMERA_SYNC",
+        payload: camData
+      }, "*")
+    }, 500)
+
+    return () => clearInterval(interval)
+  }, [camera, camera.position, camera.zoom, controlsTarget])
+
+  return null
+}
+
 /* ---------- Hlavní komponenta ---------- */
 export default function ClientPage() {
   const [lightIntensity] = useState(1)
@@ -525,16 +540,16 @@ export default function ClientPage() {
   const [photos, setPhotos] = useState([])
   const [lightbox, setLightbox] = useState({ open: false, src: null, alt: "" })
 
-  // Fotky: na mobilu výchozí stav sbaleno, na desktopu otevřeno
   const [photosOpen, setPhotosOpen] = useState(!isMobile)
   useEffect(() => { setPhotosOpen(!isMobile) }, [isMobile])
 
-  // Slidery/ovládání: na mobilu sbaleno, na desktopu otevřeno
   const [slidersOpen, setSlidersOpen] = useState(!isMobile)
   useEffect(() => { setSlidersOpen(!isMobile) }, [isMobile])
 
   const [cameraTarget, setCameraTarget] = useState([0, 0, 0])
   const [loadedCount, setLoadedCount] = useState(0)
+  const [initialCameraState, setInitialCameraState] = useState(null)
+
   const handleModelLoaded = () => setLoadedCount((n) => n + 1)
   const centerParam = (getParam("center") || "combined").toLowerCase()
   const centerMode = ["per", "combined", "none"].includes(centerParam) ? centerParam : "combined"
@@ -576,6 +591,9 @@ export default function ClientPage() {
             intensity: typeof hl?.intensity === "number" ? hl.intensity : 2.0,
           })
           setPhotos(Array.isArray(m?.photos) ? m.photos.filter(p => p && p.u) : [])
+          if (m?.camera) {
+            setInitialCameraState(m.camera)
+          }
           return
         }
 
@@ -613,6 +631,9 @@ export default function ClientPage() {
             intensity: isFinite(qI) ? qI : 2.0,
           })
           setPhotos(Array.isArray(m?.photos) ? m.photos.filter(p => p && p.u) : [])
+          if (m?.camera) {
+            setInitialCameraState(m.camera)
+          }
           return
         }
 
@@ -648,7 +669,6 @@ export default function ClientPage() {
           return
         }
 
-        // dev fallback
         const Fs = [
           { url: "/models/Upper.obj", name: "Upper", rawName: "Upper.obj", r: 0.5, m: 0.5, v: true, vc: false, km: false },
           { url: "/models/Lower.stl", name: "Lower", rawName: "Lower.stl", r: 0.5, m: 0.5, v: true, vc: false, km: false },
@@ -691,7 +711,6 @@ export default function ClientPage() {
 
   const rootRef = useRef()
 
-  // --- obsah sliderů/ovládání jako blok ---
   const slidersContent = fatal ? (
     <div style={{ color: "#ff8b8b" }}>{fatal}</div>
   ) : (
@@ -743,7 +762,6 @@ export default function ClientPage() {
         </div>
       ))}
 
-      {/* Auto smooth + Wireframe */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginTop: 10 }}>
         <Switch checked={autoSmooth} onChange={setAutoSmooth} label="Auto smooth" />
         <Switch checked={wireframe} onChange={setWireframe} label="Wireframe" />
@@ -766,7 +784,6 @@ export default function ClientPage() {
         maxHeight: "calc(100vh - 20px)", overflowY: "auto",
       }}
     >
-      {/* Titulek mimo ohraničení slider panelu */}
       {title && (
         <div
           title={title}
@@ -787,7 +804,6 @@ export default function ClientPage() {
         </div>
       )}
 
-      {/* Slidery – na mobilu rozklikávací stejně jako Fotky */}
       <div>
         {isMobile ? (
           <>
@@ -829,7 +845,6 @@ export default function ClientPage() {
         )}
       </div>
 
-      {/* Fotky – sbalitelné na mobilu */}
       {photos && photos.length > 0 && (
         <div style={{ marginTop: 10 }}>
           <button
@@ -910,17 +925,29 @@ export default function ClientPage() {
             </Suspense>
           </group>
 
-          {/* Centering & framing */}
-          <AutoCenterAndFrame
-            rootRef={rootRef}
-            depsKey={loadedCount === files.length ? `ready-${files.length}` : `loading-${loadedCount}`}
-            setTarget={setCameraTarget}
-            margin={1.2}
-            isMobile={isMobile}
-            desktopScale={0.4}
-            mobileScale={1.0}
-            centerMode={"combined"}
-          />
+          {/* Synchronizace pozice ven do Frameru */}
+          <CameraSync controlsTarget={cameraTarget} />
+
+          {/* Centering & framing - Použije se JEN POKUD není uložena vlastní pozice */}
+          {!initialCameraState ? (
+            <AutoCenterAndFrame
+              rootRef={rootRef}
+              depsKey={loadedCount === files.length ? `ready-${files.length}` : `loading-${loadedCount}`}
+              setTarget={setCameraTarget}
+              margin={1.2}
+              isMobile={isMobile}
+              desktopScale={0.4}
+              mobileScale={1.0}
+              centerMode={"combined"}
+            />
+          ) : (
+            <CustomCameraSetter 
+              camState={initialCameraState} 
+              setTarget={setCameraTarget} 
+              depsKey={loadedCount === files.length ? `ready-${files.length}` : `loading-${loadedCount}`}
+            />
+          )}
+
           <TouchTrackballControls target={cameraTarget} />
           <RightButtonPan setTarget={setCameraTarget} />
         </>
@@ -935,7 +962,6 @@ export default function ClientPage() {
         .slider::-moz-range-track { height: 4px; background: white; border-radius: 2px; }
         .slider::-moz-range-thumb { width: 14px; height: 14px; border-radius: 50%; background: white; cursor: pointer; box-shadow: 0 0 2px black; border: none; }
 
-        /* Color input – odstranění vnitřního šedého rámečku */
         .color-input { -webkit-appearance: none; appearance: none; }
         .color-input::-webkit-color-swatch-wrapper { padding: 0; }
         .color-input::-webkit-color-swatch { border: none; border-radius: 2px; }
@@ -1013,6 +1039,34 @@ function AutoCenterAndFrame({
     camera.zoom = Math.max(newZoom, 0.01)
     camera.updateProjectionMatrix()
   }, [depsKey, size.width, size.height, isMobile, desktopScale, mobileScale, margin, centerMode, setTarget])
+
+  return null
+}
+
+/* ---------- Nastavení uložené kamery ---------- */
+function CustomCameraSetter({ camState, setTarget, depsKey }) {
+  const { camera } = useThree()
+
+  useEffect(() => {
+    if (!camState) return
+    
+    // Nastavení pozice
+    if (camState.position) {
+      camera.position.set(camState.position[0], camState.position[1], camState.position[2])
+    }
+    
+    // Nastavení zoomu (důležité pro orthographic)
+    if (camState.zoom) {
+      camera.zoom = camState.zoom
+    }
+    
+    camera.updateProjectionMatrix()
+
+    // Nastavení targetu pro rotaci (Trackball)
+    if (camState.target) {
+      setTarget(camState.target)
+    }
+  }, [depsKey, camState, setTarget, camera])
 
   return null
 }
